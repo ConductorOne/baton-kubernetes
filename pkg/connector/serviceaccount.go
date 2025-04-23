@@ -40,16 +40,6 @@ func (s *serviceAccountBuilder) List(ctx context.Context, parentResourceID *v2.R
 		return nil, "", nil, fmt.Errorf("failed to parse page token: %w", err)
 	}
 
-	// Add wildcard resource first, but only on the first page (when page token is empty)
-	if bag.PageToken() == "" {
-		wildcardResource, err := generateWildcardResource(resourceTypeServiceAccount)
-		if err != nil {
-			l.Error("failed to create wildcard resource for service accounts", zap.Error(err))
-		} else {
-			rv = append(rv, wildcardResource)
-		}
-	}
-
 	// Set up list options with pagination
 	opts := metav1.ListOptions{
 		Limit:    ResourcesPageSize,
@@ -129,7 +119,10 @@ func serviceAccountResource(serviceAccount *corev1.ServiceAccount) (*v2.Resource
 		serviceAccount.Name,
 		resourceTypeServiceAccount,
 		rawID,
-		[]rs.UserTraitOption{rs.WithUserProfile(profile)},
+		[]rs.UserTraitOption{
+			rs.WithAccountType(v2.UserTrait_ACCOUNT_TYPE_SERVICE),
+			rs.WithUserProfile(profile),
+		},
 		rs.WithParentResourceID(parentID),
 	)
 	if err != nil {
@@ -141,6 +134,8 @@ func serviceAccountResource(serviceAccount *corev1.ServiceAccount) (*v2.Resource
 
 // Entitlements returns entitlements for ServiceAccount resources
 func (s *serviceAccountBuilder) Entitlements(_ context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
+	var entitlements []*v2.Entitlement
+
 	// Add 'impersonate' entitlement
 	impersonateEnt := entitlement.NewPermissionEntitlement(
 		resource,
@@ -152,8 +147,24 @@ func (s *serviceAccountBuilder) Entitlements(_ context.Context, resource *v2.Res
 			resourceTypeClusterRole,
 		),
 	)
+	entitlements = append(entitlements, impersonateEnt)
 
-	return []*v2.Entitlement{impersonateEnt}, "", nil, nil
+	// Add standard verb entitlements
+	for _, verb := range standardResourceVerbs {
+		ent := entitlement.NewPermissionEntitlement(
+			resource,
+			verb,
+			entitlement.WithDisplayName(fmt.Sprintf("%s %s", verb, resource.DisplayName)),
+			entitlement.WithDescription(fmt.Sprintf("Grants %s permission on the %s service account", verb, resource.DisplayName)),
+			entitlement.WithGrantableTo(
+				resourceTypeRole,
+				resourceTypeClusterRole,
+			),
+		)
+		entitlements = append(entitlements, ent)
+	}
+
+	return entitlements, "", nil, nil
 }
 
 // Grants returns no grants for ServiceAccount resources

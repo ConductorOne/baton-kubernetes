@@ -27,6 +27,7 @@ var standardResourceVerbs = []string{
 	"update",
 	"patch",
 	"delete",
+	"deletecollection",
 }
 
 // secretBuilder syncs Kubernetes Secrets as Baton resources
