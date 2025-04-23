@@ -1,4 +1,11 @@
 baton-kubernetes
-Copyright 2024 ConductorOne, Inc.
+Copyright 2025 ConductorOne, Inc.
 
-This product includes software developed by ConductorOne (https://www.conductorone.com/).
+This product includes software developed by ConductorOne (<https://www.conductorone.com/>).
+
+Portions of baton-kubernetes is derived from the following project:
+
+kubectl-who-can
+Copyright 2019-2022 Aqua Security Software Ltd.
+
+This product includes software developed by Aqua Security (<https://aquasec.com>).
