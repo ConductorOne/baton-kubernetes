@@ -14,6 +14,8 @@ import (
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"go.uber.org/zap"
+
+	"github.com/conductorone/baton-sdk/pkg/types/entitlement"
 )
 
 // namespaceBuilder syncs Kubernetes Namespaces as Baton resources
@@ -116,12 +118,61 @@ func namespaceResource(ns *corev1.Namespace) (*v2.Resource, error) {
 	return resource, nil
 }
 
-// Entitlements returns no entitlements for Namespace resources
-func (n *namespaceBuilder) Entitlements(_ context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
-	return nil, "", nil, nil
+// Entitlements defines the entitlements for namespace resources.
+func (n *namespaceBuilder) Entitlements(ctx context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
+	var entitlements []*v2.Entitlement
+
+	// Define entitlements for standard verbs applicable to Namespaces
+	// For type-level permissions granted by Roles/ClusterRoles, we associate the entitlement
+	// with the resource type, but NewPermissionEntitlement expects a *v2.Resource.
+	// We use the `resource` passed in, assuming it represents a typical instance
+	// or using the resource type ID if needed, though SDK functions handle this.
+	// Baton core resolves these based on the target resource ID in the grant (`namespace:*`).
+
+	getEnt := entitlement.NewPermissionEntitlement(resource, "get",
+		entitlement.WithDisplayName(fmt.Sprintf("Get %s Namespace", resource.DisplayName)),
+		entitlement.WithDescription(fmt.Sprintf("Allows reading the %s namespace", resource.DisplayName)),
+		entitlement.WithGrantableTo(resourceTypeRole, resourceTypeClusterRole),
+	)
+	listEnt := entitlement.NewPermissionEntitlement(resource, "list",
+		entitlement.WithDisplayName("List Namespaces"), // List is typically not per-resource
+		entitlement.WithDescription("Allows listing namespaces"),
+		entitlement.WithGrantableTo(resourceTypeRole, resourceTypeClusterRole),
+	)
+	watchEnt := entitlement.NewPermissionEntitlement(resource, "watch",
+		entitlement.WithDisplayName("Watch Namespaces"), // Watch is typically not per-resource
+		entitlement.WithDescription("Allows watching namespaces for changes"),
+		entitlement.WithGrantableTo(resourceTypeRole, resourceTypeClusterRole),
+	)
+	createEnt := entitlement.NewPermissionEntitlement(resource, "create",
+		entitlement.WithDisplayName("Create Namespace"),
+		entitlement.WithDescription("Allows creating new namespaces"),
+		entitlement.WithGrantableTo(resourceTypeRole, resourceTypeClusterRole),
+	)
+	updateEnt := entitlement.NewPermissionEntitlement(resource, "update",
+		entitlement.WithDisplayName(fmt.Sprintf("Update %s Namespace", resource.DisplayName)),
+		entitlement.WithDescription(fmt.Sprintf("Allows updating the %s namespace", resource.DisplayName)),
+		entitlement.WithGrantableTo(resourceTypeRole, resourceTypeClusterRole),
+	)
+	patchEnt := entitlement.NewPermissionEntitlement(resource, "patch",
+		entitlement.WithDisplayName(fmt.Sprintf("Patch %s Namespace", resource.DisplayName)),
+		entitlement.WithDescription(fmt.Sprintf("Allows patching the %s namespace", resource.DisplayName)),
+		entitlement.WithGrantableTo(resourceTypeRole, resourceTypeClusterRole),
+	)
+	deleteEnt := entitlement.NewPermissionEntitlement(resource, "delete",
+		entitlement.WithDisplayName(fmt.Sprintf("Delete %s Namespace", resource.DisplayName)),
+		entitlement.WithDescription(fmt.Sprintf("Allows deleting the %s namespace", resource.DisplayName)),
+		entitlement.WithGrantableTo(resourceTypeRole, resourceTypeClusterRole),
+	)
+
+	entitlements = append(entitlements, getEnt, listEnt, watchEnt, createEnt, updateEnt, patchEnt, deleteEnt)
+
+	// Add any other existing or specific entitlements for namespaces here...
+
+	return entitlements, "", nil, nil
 }
 
-// Grants returns no grants for Namespace resources
+// Grants defines the grants for namespace resources.
 func (n *namespaceBuilder) Grants(_ context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
 	return nil, "", nil, nil
 }

@@ -19,11 +19,23 @@ func mapSubjectToPrincipalID(subject rbacv1.Subject, defaultNamespace string) (*
 			}
 			namespace = defaultNamespace
 		}
-		return namespacedResourceID(resourceTypeServiceAccount, namespace, subject.Name)
+		// Create a safe resource ID that handles special characters
+		return &v2.ResourceId{
+			ResourceType: resourceTypeServiceAccount.Id,
+			Resource:     namespace + "/" + subject.Name,
+		}, nil
 	case "User":
-		return clusterScopedResourceID(resourceTypeKubeUser, subject.Name)
+		// Handle special characters in user names (like system:masters)
+		return &v2.ResourceId{
+			ResourceType: resourceTypeKubeUser.Id,
+			Resource:     subject.Name,
+		}, nil
 	case "Group":
-		return clusterScopedResourceID(resourceTypeKubeGroup, subject.Name)
+		// Handle special characters in group names (like system:authenticated)
+		return &v2.ResourceId{
+			ResourceType: resourceTypeKubeGroup.Id,
+			Resource:     subject.Name,
+		}, nil
 	default:
 		return nil, fmt.Errorf("unsupported subject kind: %s", subject.Kind)
 	}

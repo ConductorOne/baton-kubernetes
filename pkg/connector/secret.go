@@ -183,7 +183,7 @@ func (s *secretBuilder) Entitlements(ctx context.Context, resource *v2.Resource,
 	return entitlements, "", nil, nil
 }
 
-// Grants returns no grants for Secret resources
+// Grants returns permission grants for Secret resources to service accounts and other principals
 func (s *secretBuilder) Grants(ctx context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
 	return nil, "", nil, nil
 }

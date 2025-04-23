@@ -228,7 +228,7 @@ func (k *Kubernetes) loadBindingsCaches(ctx context.Context) error {
 }
 
 // GetMatchingRoleBindings returns all RoleBindings that reference the specified Role
-func (k *Kubernetes) GetMatchingRoleBindings(ctx context.Context, namespace, roleName string) ([]rbacv1.RoleBinding, error) {
+func (k *Kubernetes) GetMatchingRoleBindings(ctx context.Context, namespace string, roleName string) ([]rbacv1.RoleBinding, error) {
 	// Ensure bindings cache is loaded
 	if err := k.loadBindingsCaches(ctx); err != nil {
 		return nil, fmt.Errorf("failed to load bindings cache: %w", err)

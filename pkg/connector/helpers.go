@@ -43,6 +43,7 @@ func formatResourceID(resourceType *v2.ResourceType, id string) (*v2.ResourceId,
 		return nil, fmt.Errorf("resource type is required")
 	}
 
+	// Allow ids with special characters like colons or wildcards
 	return &v2.ResourceId{
 		ResourceType: resourceType.Id,
 		Resource:     id,
@@ -51,12 +52,18 @@ func formatResourceID(resourceType *v2.ResourceType, id string) (*v2.ResourceId,
 
 // namespacedResourceID creates a Baton resource ID for a namespaced resource
 func namespacedResourceID(resourceType *v2.ResourceType, namespace string, name string) (*v2.ResourceId, error) {
+	// Handle special cases for wildcards
+	if namespace == "*" && name == "*" {
+		return formatResourceID(resourceType, "*")
+	}
+
 	id := namespace + "/" + name
 	return formatResourceID(resourceType, id)
 }
 
 // clusterScopedResourceID creates a Baton resource ID for a cluster-scoped resource
 func clusterScopedResourceID(resourceType *v2.ResourceType, name string) (*v2.ResourceId, error) {
+	// Allow cluster-scoped resources to have special characters like colons
 	return formatResourceID(resourceType, name)
 }
 
