@@ -8,7 +8,7 @@ import (
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 )
 
-// mapSubjectToPrincipalID converts a Kubernetes Subject to a Baton ResourceID
+// mapSubjectToPrincipalID converts a Kubernetes Subject to a Baton ResourceID.
 func mapSubjectToPrincipalID(subject rbacv1.Subject, defaultNamespace string) (*v2.ResourceId, error) {
 	switch subject.Kind {
 	case "ServiceAccount":
@@ -20,9 +20,9 @@ func mapSubjectToPrincipalID(subject rbacv1.Subject, defaultNamespace string) (*
 			namespace = defaultNamespace
 		}
 		return namespacedResourceID(resourceTypeServiceAccount, namespace, subject.Name)
-	case "User":
+	case SubjectTypeUser:
 		return clusterScopedResourceID(resourceTypeKubeUser, subject.Name)
-	case "Group":
+	case SubjectTypeGroup:
 		return clusterScopedResourceID(resourceTypeKubeGroup, subject.Name)
 	default:
 		return nil, fmt.Errorf("unsupported subject kind: %s", subject.Kind)

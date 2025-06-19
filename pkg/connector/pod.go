@@ -17,17 +17,17 @@ import (
 	"go.uber.org/zap"
 )
 
-// podBuilder syncs Kubernetes Pods as Baton resources
+// podBuilder syncs Kubernetes Pods as Baton resources.
 type podBuilder struct {
 	client kubernetes.Interface
 }
 
-// ResourceType returns the resource type for Pod
+// ResourceType returns the resource type for Pod.
 func (p *podBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
 	return resourceTypePod
 }
 
-// List fetches all Pods from the Kubernetes API
+// List fetches all Pods from the Kubernetes API.
 func (p *podBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, pToken *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
 	l := ctxzap.Extract(ctx)
 
@@ -85,7 +85,7 @@ func (p *podBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, 
 	return rv, nextPageToken, nil, nil
 }
 
-// podResource creates a Baton resource from a Kubernetes Pod
+// podResource creates a Baton resource from a Kubernetes Pod.
 func podResource(pod *corev1.Pod) (*v2.Resource, error) {
 	// Get parent namespace resource ID
 	parentID, err := namespaceResourceID(pod.Namespace)
@@ -121,7 +121,7 @@ func podResource(pod *corev1.Pod) (*v2.Resource, error) {
 	return resource, nil
 }
 
-// Entitlements returns standard verb entitlements for Pod resources
+// Entitlements returns standard verb entitlements for Pod resources.
 func (p *podBuilder) Entitlements(ctx context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
 	var entitlements []*v2.Entitlement
 
@@ -168,12 +168,12 @@ func (p *podBuilder) Entitlements(ctx context.Context, resource *v2.Resource, _ 
 	return entitlements, "", nil, nil
 }
 
-// Grants returns no grants for Pod resources
+// Grants returns no grants for Pod resources.
 func (p *podBuilder) Grants(ctx context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
 	return nil, "", nil, nil
 }
 
-// newPodBuilder creates a new pod builder
+// newPodBuilder creates a new pod builder.
 func newPodBuilder(client kubernetes.Interface) *podBuilder {
 	return &podBuilder{
 		client: client,

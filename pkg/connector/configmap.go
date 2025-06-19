@@ -17,17 +17,17 @@ import (
 	"go.uber.org/zap"
 )
 
-// configMapBuilder syncs Kubernetes ConfigMaps as Baton resources
+// configMapBuilder syncs Kubernetes ConfigMaps as Baton resources.
 type configMapBuilder struct {
 	client kubernetes.Interface
 }
 
-// ResourceType returns the resource type for ConfigMap
+// ResourceType returns the resource type for ConfigMap.
 func (c *configMapBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
 	return resourceTypeConfigMap
 }
 
-// List fetches all ConfigMaps from the Kubernetes API
+// List fetches all ConfigMaps from the Kubernetes API.
 func (c *configMapBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, pToken *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
 	l := ctxzap.Extract(ctx)
 
@@ -85,7 +85,7 @@ func (c *configMapBuilder) List(ctx context.Context, parentResourceID *v2.Resour
 	return rv, nextPageToken, nil, nil
 }
 
-// configMapResource creates a Baton resource from a Kubernetes ConfigMap
+// configMapResource creates a Baton resource from a Kubernetes ConfigMap.
 func configMapResource(cm *corev1.ConfigMap) (*v2.Resource, error) {
 	// Get parent namespace resource ID
 	parentID, err := namespaceResourceID(cm.Namespace)
@@ -121,7 +121,7 @@ func configMapResource(cm *corev1.ConfigMap) (*v2.Resource, error) {
 	return resource, nil
 }
 
-// Entitlements returns standard verb entitlements for ConfigMap resources
+// Entitlements returns standard verb entitlements for ConfigMap resources.
 func (c *configMapBuilder) Entitlements(ctx context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
 	var entitlements []*v2.Entitlement
 
@@ -143,12 +143,12 @@ func (c *configMapBuilder) Entitlements(ctx context.Context, resource *v2.Resour
 	return entitlements, "", nil, nil
 }
 
-// Grants returns no grants for ConfigMap resources
+// Grants returns no grants for ConfigMap resources.
 func (c *configMapBuilder) Grants(ctx context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
 	return nil, "", nil, nil
 }
 
-// newConfigMapBuilder creates a new configmap builder
+// newConfigMapBuilder creates a new configmap builder.
 func newConfigMapBuilder(client kubernetes.Interface) *configMapBuilder {
 	return &configMapBuilder{
 		client: client,

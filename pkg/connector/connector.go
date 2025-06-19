@@ -17,7 +17,16 @@ import (
 	"k8s.io/client-go/rest"
 )
 
-// Resource type definitions
+const (
+	ResourceTypeClusterRoleBindings = "clusterrolebindings"
+	ResourceTypeClusterRoleBinding  = "clusterrolebinding"
+	ResourceTypeRoleBindings        = "rolebindings"
+	ResourceTypeRoleBinding         = "rolebinding"
+	SubjectTypeGroup                = "Group"
+	SubjectTypeUser                 = "User"
+)
+
+// Resource type definitions.
 var (
 	resourceTypeNamespace      = &v2.ResourceType{Id: "namespace", DisplayName: "Namespace"}
 	resourceTypeServiceAccount = &v2.ResourceType{Id: "service_account", DisplayName: "Service Account", Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_USER}}
@@ -35,15 +44,15 @@ var (
 	resourceTypeBinding        = &v2.ResourceType{Id: "binding", DisplayName: "Binding", Description: "Internal type for processing RBAC bindings"}
 )
 
-// Configuration options
+// Configuration options.
 type connectorOpts struct {
 	SyncPods bool
 }
 
-// ConnectorOption is a function that configures the connector options
+// ConnectorOption is a function that configures the connector options.
 type ConnectorOption func(*connectorOpts) error
 
-// WithSyncPods configures the connector to sync pods
+// WithSyncPods configures the connector to sync pods.
 func WithSyncPods(syncPods bool) ConnectorOption {
 	return func(opts *connectorOpts) error {
 		opts.SyncPods = syncPods
@@ -51,7 +60,7 @@ func WithSyncPods(syncPods bool) ConnectorOption {
 	}
 }
 
-// Kubernetes connector struct
+// Kubernetes connector struct.
 type Kubernetes struct {
 	client kubernetes.Interface
 	config *rest.Config
@@ -64,7 +73,7 @@ type Kubernetes struct {
 	bindingsLoaded           bool
 }
 
-// New creates a new Kubernetes connector
+// New creates a new Kubernetes connector.
 func New(ctx context.Context, cfg *rest.Config, opts ...ConnectorOption) (*Kubernetes, error) {
 	// Validate that config is not nil
 	if cfg == nil {
@@ -96,7 +105,7 @@ func New(ctx context.Context, cfg *rest.Config, opts ...ConnectorOption) (*Kuber
 	}, nil
 }
 
-// ResourceSyncers returns the resource syncers for the Kubernetes connector
+// ResourceSyncers returns the resource syncers for the Kubernetes connector.
 func (k *Kubernetes) ResourceSyncers(ctx context.Context) []connectorbuilder.ResourceSyncer {
 	syncers := []connectorbuilder.ResourceSyncer{
 		newNamespaceBuilder(k.client),
@@ -117,7 +126,7 @@ func (k *Kubernetes) ResourceSyncers(ctx context.Context) []connectorbuilder.Res
 	return syncers
 }
 
-// Metadata returns the connector metadata
+// Metadata returns the connector metadata.
 func (k *Kubernetes) Metadata(ctx context.Context) (*v2.ConnectorMetadata, error) {
 	return &v2.ConnectorMetadata{
 		DisplayName: "Kubernetes",
@@ -125,17 +134,18 @@ func (k *Kubernetes) Metadata(ctx context.Context) (*v2.ConnectorMetadata, error
 	}, nil
 }
 
-// Validate validates the connector configuration
+// Validate validates the connector configuration.
 func (k *Kubernetes) Validate(ctx context.Context) (annotations.Annotations, error) {
 	// Try to list namespaces as a simple connectivity test
 	_, err := k.client.CoreV1().Namespaces().List(ctx, metav1.ListOptions{Limit: 1})
 	if err != nil {
 		// Check for different types of errors to provide better messages
-		if k8serrors.IsUnauthorized(err) {
+		switch {
+		case k8serrors.IsUnauthorized(err):
 			return nil, fmt.Errorf("unauthorized access to Kubernetes API: %w", err)
-		} else if k8serrors.IsForbidden(err) {
+		case k8serrors.IsForbidden(err):
 			return nil, fmt.Errorf("forbidden access to Kubernetes API (check RBAC permissions): %w", err)
-		} else {
+		default:
 			return nil, fmt.Errorf("validating kubernetes connection: %w", err)
 		}
 	}
@@ -144,7 +154,7 @@ func (k *Kubernetes) Validate(ctx context.Context) (annotations.Annotations, err
 }
 
 // loadBindingsCaches ensures that both binding caches are loaded
-// It uses a mutex to ensure thread safety
+// It uses a mutex to ensure thread safety.
 func (k *Kubernetes) loadBindingsCaches(ctx context.Context) error {
 	k.bindingsMutex.RLock()
 	if k.bindingsLoaded {
@@ -227,7 +237,7 @@ func (k *Kubernetes) loadBindingsCaches(ctx context.Context) error {
 	return nil
 }
 
-// GetMatchingRoleBindings returns all RoleBindings that reference the specified Role
+// GetMatchingRoleBindings returns all RoleBindings that reference the specified Role.
 func (k *Kubernetes) GetMatchingRoleBindings(ctx context.Context, namespace, roleName string) ([]rbacv1.RoleBinding, error) {
 	// Ensure bindings cache is loaded
 	if err := k.loadBindingsCaches(ctx); err != nil {
@@ -248,7 +258,7 @@ func (k *Kubernetes) GetMatchingRoleBindings(ctx context.Context, namespace, rol
 	return result, nil
 }
 
-// GetMatchingBindingsForClusterRole returns all RoleBindings and ClusterRoleBindings that reference the specified ClusterRole
+// GetMatchingBindingsForClusterRole returns all RoleBindings and ClusterRoleBindings that reference the specified ClusterRole.
 func (k *Kubernetes) GetMatchingBindingsForClusterRole(ctx context.Context, clusterRoleName string) ([]rbacv1.RoleBinding, []rbacv1.ClusterRoleBinding, error) {
 	// Ensure bindings cache is loaded
 	if err := k.loadBindingsCaches(ctx); err != nil {

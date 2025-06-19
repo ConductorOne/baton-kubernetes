@@ -17,17 +17,17 @@ import (
 	"go.uber.org/zap"
 )
 
-// daemonSetBuilder syncs Kubernetes DaemonSets as Baton resources
+// daemonSetBuilder syncs Kubernetes DaemonSets as Baton resources.
 type daemonSetBuilder struct {
 	client kubernetes.Interface
 }
 
-// ResourceType returns the resource type for DaemonSet
+// ResourceType returns the resource type for DaemonSet.
 func (d *daemonSetBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
 	return resourceTypeDaemonSet
 }
 
-// List fetches all DaemonSets from the Kubernetes API
+// List fetches all DaemonSets from the Kubernetes API.
 func (d *daemonSetBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, pToken *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
 	l := ctxzap.Extract(ctx)
 
@@ -85,7 +85,7 @@ func (d *daemonSetBuilder) List(ctx context.Context, parentResourceID *v2.Resour
 	return rv, nextPageToken, nil, nil
 }
 
-// daemonSetResource creates a Baton resource from a Kubernetes DaemonSet
+// daemonSetResource creates a Baton resource from a Kubernetes DaemonSet.
 func daemonSetResource(daemonset *appsv1.DaemonSet) (*v2.Resource, error) {
 	// Get parent namespace resource ID
 	parentID, err := namespaceResourceID(daemonset.Namespace)
@@ -121,7 +121,7 @@ func daemonSetResource(daemonset *appsv1.DaemonSet) (*v2.Resource, error) {
 	return resource, nil
 }
 
-// Entitlements returns standard verb entitlements for DaemonSet resources
+// Entitlements returns standard verb entitlements for DaemonSet resources.
 func (d *daemonSetBuilder) Entitlements(ctx context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
 	var entitlements []*v2.Entitlement
 
@@ -143,12 +143,12 @@ func (d *daemonSetBuilder) Entitlements(ctx context.Context, resource *v2.Resour
 	return entitlements, "", nil, nil
 }
 
-// Grants returns no grants for DaemonSet resources
+// Grants returns no grants for DaemonSet resources.
 func (d *daemonSetBuilder) Grants(ctx context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
 	return nil, "", nil, nil
 }
 
-// newDaemonSetBuilder creates a new daemonset builder
+// newDaemonSetBuilder creates a new daemonset builder.
 func newDaemonSetBuilder(client kubernetes.Interface) *daemonSetBuilder {
 	return &daemonSetBuilder{
 		client: client,

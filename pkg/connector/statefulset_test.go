@@ -118,14 +118,15 @@ func TestStatefulSetBuilderList(t *testing.T) {
 	var foundSts1, foundSts2 bool
 
 	for _, res := range resources {
-		if res.Id.Resource == "*" {
+		switch {
+		case res.Id.Resource == "*":
 			wildcardResourceFound = true
 			assert.Equal(t, resourceTypeStatefulSet.Id, res.Id.ResourceType)
 			assert.Contains(t, res.DisplayName, "All")
-		} else if res.DisplayName == "test-statefulset-1" {
+		case res.DisplayName == "test-statefulset-1":
 			foundSts1 = true
 			assert.Equal(t, "test-namespace/test-statefulset-1", res.Id.Resource)
-		} else if res.DisplayName == "test-statefulset-2" {
+		case res.DisplayName == "test-statefulset-2":
 			foundSts2 = true
 			assert.Equal(t, "test-namespace/test-statefulset-2", res.Id.Resource)
 		}
@@ -212,7 +213,7 @@ func TestStatefulSetBuilderGrants(t *testing.T) {
 	assert.Empty(t, grants)
 }
 
-// Helper function to create int32 pointer
+// Helper function to create int32 pointer.
 func int32Ptr(i int32) *int32 {
 	return &i
 }

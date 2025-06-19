@@ -8,14 +8,14 @@ import (
 	"github.com/spf13/viper"
 
 	clioptions "k8s.io/cli-runtime/pkg/genericclioptions"
-	"k8s.io/utils/pointer"
+	pointer "k8s.io/utils/ptr"
 )
 
 // https://github.com/kubernetes/cli-runtime/blob/v0.32.3/pkg/genericclioptions/config_flags.go#L349
 // https://github.com/kubernetes/cli-runtime/blob/v0.32.3/pkg/genericclioptions/config_flags.go#L46
 
 const (
-	// From k8s.io/cli-runtime/pkg/genericclioptions/config_flags.go
+	// From k8s.io/cli-runtime/pkg/genericclioptions/config_flags.go.
 	flagClusterName        = "cluster"
 	flagAuthInfoName       = "user"
 	flagContext            = "context"
@@ -39,25 +39,36 @@ const (
 )
 
 var (
-	kubeconfigField         = field.StringField(flagKubeconfig, field.WithDescription("Path to the kubeconfig file to use for CLI requests."))
-	cacheDirField           = field.StringField(flagCacheDir, field.WithDescription("Default cache directory"))
-	certFileField           = field.StringField(flagCertFile, field.WithDescription("Path to a client certificate file for TLS"), field.WithRequired(false))
-	keyFileField            = field.StringField(flagKeyFile, field.WithDescription("Path to a client key file for TLS"), field.WithRequired(false))
-	bearerTokenField        = field.StringField(flagBearerToken, field.WithDescription("Bearer token for authentication to the API server"), field.WithRequired(false))
-	impersonateField        = field.StringField(flagImpersonate, field.WithDescription("Username to impersonate for the operation. User could be a regular user or a service account in a namespace."), field.WithRequired(false))
-	impersonateUIDField     = field.StringField(flagImpersonateUID, field.WithDescription("UID to impersonate for the operation."), field.WithRequired(false))
-	impersonateGroupField   = field.StringSliceField(flagImpersonateGroup, field.WithDescription("Group to impersonate for the operation, this flag can be repeated to specify multiple groups."), field.WithRequired(false))
-	usernameField           = field.StringField(flagUsername, field.WithDescription("Username for basic authentication to the API server"), field.WithRequired(false))
-	passwordField           = field.StringField(flagPassword, field.WithDescription("Password for basic authentication to the API server"), field.WithRequired(false), field.WithIsSecret(true))
-	clusterNameField        = field.StringField(flagClusterName, field.WithDescription("The name of the kubeconfig cluster to use"), field.WithRequired(false))
-	authInfoNameField       = field.StringField(flagAuthInfoName, field.WithDescription("The name of the kubeconfig user to use"), field.WithRequired(false))
-	namespaceField          = field.StringField(flagNamespace, field.WithDescription("If present, the namespace scope for this CLI request"), field.WithRequired(false))
-	contextField            = field.StringField(flagContext, field.WithDescription("The name of the kubeconfig context to use"), field.WithRequired(false))
-	apiServerField          = field.StringField(flagAPIServer, field.WithDescription("The address and port of the Kubernetes API server"), field.WithRequired(false))
-	tlsServerNameField      = field.StringField(flagTLSServerName, field.WithDescription("Server name to use for server certificate validation. If it is not provided, the hostname used to contact the server is used"), field.WithRequired(false))
-	insecureField           = field.BoolField(flagInsecure, field.WithDescription("If true, the server's certificate will not be checked for validity. This will make your HTTPS connections insecure"), field.WithDefaultValue(false))
-	caFileField             = field.StringField(flagCAFile, field.WithDescription("Path to a cert file for the certificate authority"), field.WithRequired(false))
-	timeoutField            = field.StringField(flagTimeout, field.WithDescription("The length of time to wait before giving up on a single server request. Non-zero values should contain a corresponding time unit (e.g. 1s, 2m, 3h). A value of zero means don't timeout requests."), field.WithDefaultValue("0"))
+	kubeconfigField  = field.StringField(flagKubeconfig, field.WithDescription("Path to the kubeconfig file to use for CLI requests."))
+	cacheDirField    = field.StringField(flagCacheDir, field.WithDescription("Default cache directory"))
+	certFileField    = field.StringField(flagCertFile, field.WithDescription("Path to a client certificate file for TLS"), field.WithRequired(false))
+	keyFileField     = field.StringField(flagKeyFile, field.WithDescription("Path to a client key file for TLS"), field.WithRequired(false))
+	bearerTokenField = field.StringField(flagBearerToken, field.WithDescription("Bearer token for authentication to the API server"), field.WithRequired(false))
+	impersonateField = field.StringField(flagImpersonate,
+		field.WithDescription("Username to impersonate for the operation. User could be a regular user or a service account in a namespace."), field.WithRequired(false))
+	impersonateUIDField = field.StringField(flagImpersonateUID,
+		field.WithDescription("UID to impersonate for the operation."), field.WithRequired(false))
+	impersonateGroupField = field.StringSliceField(flagImpersonateGroup,
+		field.WithDescription("Group to impersonate for the operation, this flag can be repeated to specify multiple groups."), field.WithRequired(false))
+	usernameField      = field.StringField(flagUsername, field.WithDescription("Username for basic authentication to the API server"), field.WithRequired(false))
+	passwordField      = field.StringField(flagPassword, field.WithDescription("Password for basic authentication to the API server"), field.WithRequired(false), field.WithIsSecret(true))
+	clusterNameField   = field.StringField(flagClusterName, field.WithDescription("The name of the kubeconfig cluster to use"), field.WithRequired(false))
+	authInfoNameField  = field.StringField(flagAuthInfoName, field.WithDescription("The name of the kubeconfig user to use"), field.WithRequired(false))
+	namespaceField     = field.StringField(flagNamespace, field.WithDescription("If present, the namespace scope for this CLI request"), field.WithRequired(false))
+	contextField       = field.StringField(flagContext, field.WithDescription("The name of the kubeconfig context to use"), field.WithRequired(false))
+	apiServerField     = field.StringField(flagAPIServer, field.WithDescription("The address and port of the Kubernetes API server"), field.WithRequired(false))
+	tlsServerNameField = field.StringField(flagTLSServerName,
+		field.WithDescription("Server name to use for server certificate validation. If it is not provided, the hostname used to contact the server is used"), field.WithRequired(false))
+	insecureField = field.BoolField(flagInsecure,
+		field.WithDescription("If true, the server's certificate will not be checked for validity. This will make your HTTPS connections insecure"), field.WithDefaultValue(false))
+	caFileField = field.StringField(flagCAFile,
+		field.WithDescription("Path to a cert file for the certificate authority"), field.WithRequired(false))
+	timeoutField = field.StringField(flagTimeout,
+		field.WithDescription(
+			"The length of time to wait before giving up on a single server request."+
+				" Non-zero values should contain a corresponding time unit (e.g. 1s, 2m, 3h)."+
+				" A value of zero means don't timeout requests."),
+		field.WithDefaultValue("0"))
 	disableCompressionField = field.BoolField(flagDisableCompression, field.WithDescription("If true, opt-out of response compression for all requests to the server"), field.WithDefaultValue(false))
 )
 
@@ -147,26 +158,26 @@ func GetConfig(v *viper.Viper) (*clioptions.ConfigFlags, error) {
 				return nil, fmt.Errorf("error accessing kubeconfig file: %w", err)
 			}
 		}
-		opt.KubeConfig = pointer.String(kubeconfigPath)
+		opt.KubeConfig = pointer.To(kubeconfigPath)
 	}
 
 	if v.IsSet(flagCacheDir) {
-		opt.CacheDir = pointer.String(v.GetString(flagCacheDir))
+		opt.CacheDir = pointer.To(v.GetString(flagCacheDir))
 	}
 	if v.IsSet(flagCertFile) {
-		opt.CertFile = pointer.String(v.GetString(flagCertFile))
+		opt.CertFile = pointer.To(v.GetString(flagCertFile))
 	}
 	if v.IsSet(flagKeyFile) {
-		opt.KeyFile = pointer.String(v.GetString(flagKeyFile))
+		opt.KeyFile = pointer.To(v.GetString(flagKeyFile))
 	}
 	if v.IsSet(flagBearerToken) {
-		opt.BearerToken = pointer.String(v.GetString(flagBearerToken))
+		opt.BearerToken = pointer.To(v.GetString(flagBearerToken))
 	}
 	if v.IsSet(flagImpersonate) {
-		opt.Impersonate = pointer.String(v.GetString(flagImpersonate))
+		opt.Impersonate = pointer.To(v.GetString(flagImpersonate))
 	}
 	if v.IsSet(flagImpersonateUID) {
-		opt.ImpersonateUID = pointer.String(v.GetString(flagImpersonateUID))
+		opt.ImpersonateUID = pointer.To(v.GetString(flagImpersonateUID))
 	}
 	if v.IsSet(flagImpersonateGroup) {
 		// Need to get the string slice for ImpersonateGroup
@@ -174,40 +185,40 @@ func GetConfig(v *viper.Viper) (*clioptions.ConfigFlags, error) {
 		opt.ImpersonateGroup = &groups
 	}
 	if v.IsSet(flagUsername) {
-		opt.Username = pointer.String(v.GetString(flagUsername))
+		opt.Username = pointer.To(v.GetString(flagUsername))
 	}
 	if v.IsSet(flagPassword) {
-		opt.Password = pointer.String(v.GetString(flagPassword))
+		opt.Password = pointer.To(v.GetString(flagPassword))
 	}
 	if v.IsSet(flagClusterName) {
-		opt.ClusterName = pointer.String(v.GetString(flagClusterName))
+		opt.ClusterName = pointer.To(v.GetString(flagClusterName))
 	}
 	if v.IsSet(flagAuthInfoName) {
-		opt.AuthInfoName = pointer.String(v.GetString(flagAuthInfoName))
+		opt.AuthInfoName = pointer.To(v.GetString(flagAuthInfoName))
 	}
 	if v.IsSet(flagNamespace) {
-		opt.Namespace = pointer.String(v.GetString(flagNamespace))
+		opt.Namespace = pointer.To(v.GetString(flagNamespace))
 	}
 	if v.IsSet(flagContext) {
-		opt.Context = pointer.String(v.GetString(flagContext))
+		opt.Context = pointer.To(v.GetString(flagContext))
 	}
 	if v.IsSet(flagAPIServer) {
-		opt.APIServer = pointer.String(v.GetString(flagAPIServer))
+		opt.APIServer = pointer.To(v.GetString(flagAPIServer))
 	}
 	if v.IsSet(flagTLSServerName) {
-		opt.TLSServerName = pointer.String(v.GetString(flagTLSServerName))
+		opt.TLSServerName = pointer.To(v.GetString(flagTLSServerName))
 	}
 	if v.IsSet(flagInsecure) {
-		opt.Insecure = pointer.Bool(v.GetBool(flagInsecure))
+		opt.Insecure = pointer.To(v.GetBool(flagInsecure))
 	}
 	if v.IsSet(flagCAFile) {
-		opt.CAFile = pointer.String(v.GetString(flagCAFile))
+		opt.CAFile = pointer.To(v.GetString(flagCAFile))
 	}
 	if v.IsSet(flagTimeout) {
-		opt.Timeout = pointer.String(v.GetString(flagTimeout))
+		opt.Timeout = pointer.To(v.GetString(flagTimeout))
 	}
 	if v.IsSet(flagDisableCompression) {
-		opt.DisableCompression = pointer.Bool(v.GetBool(flagDisableCompression))
+		opt.DisableCompression = pointer.To(v.GetBool(flagDisableCompression))
 	}
 
 	return opt, nil

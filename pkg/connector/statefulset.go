@@ -17,17 +17,17 @@ import (
 	"go.uber.org/zap"
 )
 
-// statefulSetBuilder syncs Kubernetes StatefulSets as Baton resources
+// statefulSetBuilder syncs Kubernetes StatefulSets as Baton resources.
 type statefulSetBuilder struct {
 	client kubernetes.Interface
 }
 
-// ResourceType returns the resource type for StatefulSet
+// ResourceType returns the resource type for StatefulSet.
 func (s *statefulSetBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
 	return resourceTypeStatefulSet
 }
 
-// List fetches all StatefulSets from the Kubernetes API
+// List fetches all StatefulSets from the Kubernetes API.
 func (s *statefulSetBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, pToken *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
 	l := ctxzap.Extract(ctx)
 
@@ -85,7 +85,7 @@ func (s *statefulSetBuilder) List(ctx context.Context, parentResourceID *v2.Reso
 	return rv, nextPageToken, nil, nil
 }
 
-// statefulSetResource creates a Baton resource from a Kubernetes StatefulSet
+// statefulSetResource creates a Baton resource from a Kubernetes StatefulSet.
 func statefulSetResource(statefulset *appsv1.StatefulSet) (*v2.Resource, error) {
 	// Get parent namespace resource ID
 	parentID, err := namespaceResourceID(statefulset.Namespace)
@@ -121,7 +121,7 @@ func statefulSetResource(statefulset *appsv1.StatefulSet) (*v2.Resource, error) 
 	return resource, nil
 }
 
-// Entitlements returns standard verb entitlements for StatefulSet resources
+// Entitlements returns standard verb entitlements for StatefulSet resources.
 func (s *statefulSetBuilder) Entitlements(ctx context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
 	var entitlements []*v2.Entitlement
 
@@ -162,12 +162,12 @@ func (s *statefulSetBuilder) Entitlements(ctx context.Context, resource *v2.Reso
 	return entitlements, "", nil, nil
 }
 
-// Grants returns no grants for StatefulSet resources
+// Grants returns no grants for StatefulSet resources.
 func (s *statefulSetBuilder) Grants(ctx context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
 	return nil, "", nil, nil
 }
 
-// newStatefulSetBuilder creates a new statefulset builder
+// newStatefulSetBuilder creates a new statefulset builder.
 func newStatefulSetBuilder(client kubernetes.Interface) *statefulSetBuilder {
 	return &statefulSetBuilder{
 		client: client,

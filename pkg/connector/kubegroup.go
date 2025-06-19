@@ -17,7 +17,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// kubeGroupBuilder syncs Kubernetes groups referenced in RBAC bindings as Baton groups
+// kubeGroupBuilder syncs Kubernetes groups referenced in RBAC bindings as Baton groups.
 type kubeGroupBuilder struct {
 	client kubernetes.Interface
 	// Cache to avoid duplicate work when extracting groups from bindings
@@ -25,12 +25,12 @@ type kubeGroupBuilder struct {
 	groupCacheLock sync.RWMutex
 }
 
-// ResourceType returns the resource type for KubeGroup
+// ResourceType returns the resource type for KubeGroup.
 func (k *kubeGroupBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
 	return resourceTypeKubeGroup
 }
 
-// List extracts unique groups from RBAC bindings and creates Baton group resources
+// List extracts unique groups from RBAC bindings and creates Baton group resources.
 func (k *kubeGroupBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, pToken *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
 	l := ctxzap.Extract(ctx)
 	var rv []*v2.Resource
@@ -61,12 +61,12 @@ func (k *kubeGroupBuilder) List(ctx context.Context, parentResourceID *v2.Resour
 	pageState := bag.PageToken()
 
 	// Phase 1: Process RoleBindings
-	if pageState == "" || pageState == "rolebindings" {
+	if pageState == "" || pageState == ResourceTypeRoleBindings {
 		// Set up list options with pagination
 		opts := metav1.ListOptions{
 			Limit: ResourcesPageSize,
 		}
-		if pageState == "rolebindings" {
+		if pageState == ResourceTypeRoleBindings {
 			opts.Continue = bag.PageToken()
 		}
 
@@ -142,7 +142,7 @@ func (k *kubeGroupBuilder) List(ctx context.Context, parentResourceID *v2.Resour
 	return rv, "", nil, nil
 }
 
-// processGroup adds a group to the list of resources if not already processed
+// processGroup adds a group to the list of resources if not already processed.
 func (k *kubeGroupBuilder) processGroup(ctx context.Context, groupName string, resources *[]*v2.Resource) {
 	l := ctxzap.Extract(ctx)
 
@@ -170,7 +170,7 @@ func (k *kubeGroupBuilder) processGroup(ctx context.Context, groupName string, r
 	*resources = append(*resources, resource)
 }
 
-// kubeGroupResource creates a Baton group resource for a Kubernetes group
+// kubeGroupResource creates a Baton group resource for a Kubernetes group.
 func (k *kubeGroupBuilder) kubeGroupResource(groupName string) (*v2.Resource, error) {
 	// Create profile
 	profile := map[string]interface{}{
@@ -196,7 +196,7 @@ func (k *kubeGroupBuilder) kubeGroupResource(groupName string) (*v2.Resource, er
 	return resource, nil
 }
 
-// Entitlements returns entitlements for Group resources
+// Entitlements returns entitlements for Group resources.
 func (k *kubeGroupBuilder) Entitlements(_ context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
 	// Add 'impersonate' entitlement
 	impersonateEnt := entitlement.NewPermissionEntitlement(
@@ -213,12 +213,12 @@ func (k *kubeGroupBuilder) Entitlements(_ context.Context, resource *v2.Resource
 	return []*v2.Entitlement{impersonateEnt}, "", nil, nil
 }
 
-// Grants returns no grants for Group resources
+// Grants returns no grants for Group resources.
 func (k *kubeGroupBuilder) Grants(_ context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
 	return nil, "", nil, nil
 }
 
-// newKubeGroupBuilder creates a new kube group builder
+// newKubeGroupBuilder creates a new kube group builder.
 func newKubeGroupBuilder(client kubernetes.Interface) *kubeGroupBuilder {
 	return &kubeGroupBuilder{
 		client:     client,
