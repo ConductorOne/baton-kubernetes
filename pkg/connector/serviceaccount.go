@@ -17,17 +17,17 @@ import (
 	"go.uber.org/zap"
 )
 
-// serviceAccountBuilder syncs Kubernetes ServiceAccounts as Baton users
+// serviceAccountBuilder syncs Kubernetes ServiceAccounts as Baton users.
 type serviceAccountBuilder struct {
 	client kubernetes.Interface
 }
 
-// ResourceType returns the resource type for ServiceAccount
+// ResourceType returns the resource type for ServiceAccount.
 func (s *serviceAccountBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
 	return resourceTypeServiceAccount
 }
 
-// List fetches all ServiceAccounts from the Kubernetes API
+// List fetches all ServiceAccounts from the Kubernetes API.
 func (s *serviceAccountBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, pToken *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
 	l := ctxzap.Extract(ctx)
 
@@ -85,7 +85,7 @@ func (s *serviceAccountBuilder) List(ctx context.Context, parentResourceID *v2.R
 	return rv, nextPageToken, nil, nil
 }
 
-// serviceAccountResource creates a Baton resource from a Kubernetes ServiceAccount
+// serviceAccountResource creates a Baton resource from a Kubernetes ServiceAccount.
 func serviceAccountResource(serviceAccount *corev1.ServiceAccount) (*v2.Resource, error) {
 	// Prepare profile with standard metadata
 	profile := map[string]interface{}{
@@ -139,7 +139,7 @@ func serviceAccountResource(serviceAccount *corev1.ServiceAccount) (*v2.Resource
 	return resource, nil
 }
 
-// Entitlements returns entitlements for ServiceAccount resources
+// Entitlements returns entitlements for ServiceAccount resources.
 func (s *serviceAccountBuilder) Entitlements(_ context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
 	// Add 'impersonate' entitlement
 	impersonateEnt := entitlement.NewPermissionEntitlement(
@@ -156,12 +156,12 @@ func (s *serviceAccountBuilder) Entitlements(_ context.Context, resource *v2.Res
 	return []*v2.Entitlement{impersonateEnt}, "", nil, nil
 }
 
-// Grants returns no grants for ServiceAccount resources
+// Grants returns no grants for ServiceAccount resources.
 func (s *serviceAccountBuilder) Grants(_ context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
 	return nil, "", nil, nil
 }
 
-// newServiceAccountBuilder creates a new service account builder
+// newServiceAccountBuilder creates a new service account builder.
 func newServiceAccountBuilder(client kubernetes.Interface) *serviceAccountBuilder {
 	return &serviceAccountBuilder{
 		client: client,

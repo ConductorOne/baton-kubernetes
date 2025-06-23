@@ -19,18 +19,18 @@ import (
 	"go.uber.org/zap"
 )
 
-// roleBuilder syncs Kubernetes Roles as Baton resources
+// roleBuilder syncs Kubernetes Roles as Baton resources.
 type roleBuilder struct {
 	client          kubernetes.Interface
 	bindingProvider roleBindingProvider
 }
 
-// ResourceType returns the resource type for Role
+// ResourceType returns the resource type for Role.
 func (r *roleBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
 	return resourceTypeRole
 }
 
-// List fetches all Roles from the Kubernetes API
+// List fetches all Roles from the Kubernetes API.
 func (r *roleBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, pToken *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
 	l := ctxzap.Extract(ctx)
 
@@ -78,7 +78,7 @@ func (r *roleBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId,
 	return rv, nextPageToken, nil, nil
 }
 
-// roleResource creates a Baton resource from a Kubernetes Role
+// roleResource creates a Baton resource from a Kubernetes Role.
 func roleResource(role *rbacv1.Role) (*v2.Resource, error) {
 	// Prepare profile with standard metadata
 	profile := map[string]interface{}{
@@ -120,7 +120,7 @@ func roleResource(role *rbacv1.Role) (*v2.Resource, error) {
 	return resource, nil
 }
 
-// Entitlements returns entitlements for Role resources
+// Entitlements returns entitlements for Role resources.
 func (r *roleBuilder) Entitlements(ctx context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
 	var entitlements []*v2.Entitlement
 
@@ -167,7 +167,7 @@ func (r *roleBuilder) Entitlements(ctx context.Context, resource *v2.Resource, _
 	return entitlements, "", nil, nil
 }
 
-// mapKubeResourceToBatonType maps Kubernetes API groups and resources to Baton resource types
+// mapKubeResourceToBatonType maps Kubernetes API groups and resources to Baton resource types.
 func mapKubeResourceToBatonType(apiGroup string, resource string) *v2.ResourceType {
 	// Core API group (indicated by empty string)
 	if apiGroup == "" || apiGroup == "core" {
@@ -221,9 +221,9 @@ func mapKubeResourceToBatonType(apiGroup string, resource string) *v2.ResourceTy
 			return resourceTypeRole
 		case "clusterroles", "clusterrole":
 			return resourceTypeClusterRole
-		case "rolebindings", "rolebinding":
+		case ResourceTypeRoleBinding, ResourceTypeRoleBindings:
 			return resourceTypeBinding
-		case "clusterrolebindings", "clusterrolebinding":
+		case ResourceTypeClusterRoleBindings, ResourceTypeClusterRoleBinding:
 			return resourceTypeBinding
 		case "*":
 			// Wildcard for all RBAC resources
@@ -252,8 +252,8 @@ func mapKubeResourceToBatonType(apiGroup string, resource string) *v2.ResourceTy
 	return nil
 }
 
-// parseResourceID extracts namespace and name from a role resource ID
-func parseRoleResourceID(resourceID *v2.ResourceId) (namespace string, name string, err error) {
+// parseResourceID extracts namespace and name from a role resource ID.
+func parseRoleResourceID(resourceID *v2.ResourceId) (string, string, error) {
 	if resourceID == nil {
 		return "", "", fmt.Errorf("resource ID is nil")
 	}
@@ -266,7 +266,7 @@ func parseRoleResourceID(resourceID *v2.ResourceId) (namespace string, name stri
 	return parts[0], parts[1], nil
 }
 
-// Grants returns permission grants for Role resources
+// Grants returns permission grants for Role resources.
 func (r *roleBuilder) Grants(ctx context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
 	l := ctxzap.Extract(ctx)
 	var rv []*v2.Grant
@@ -383,7 +383,7 @@ func (r *roleBuilder) Grants(ctx context.Context, resource *v2.Resource, _ *pagi
 	return rv, "", nil, nil
 }
 
-// newRoleBuilder creates a new role builder
+// newRoleBuilder creates a new role builder.
 func newRoleBuilder(client kubernetes.Interface, bindingProvider roleBindingProvider) *roleBuilder {
 	return &roleBuilder{
 		client:          client,

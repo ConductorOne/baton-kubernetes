@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestWildcardResources verifies that wildcard resources can be created successfully
+// TestWildcardResources verifies that wildcard resources can be created successfully.
 func TestWildcardResources(t *testing.T) {
 	testCases := []struct {
 		name         string

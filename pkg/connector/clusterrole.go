@@ -18,18 +18,18 @@ import (
 	"go.uber.org/zap"
 )
 
-// clusterRoleBuilder syncs Kubernetes ClusterRoles as Baton resources
+// clusterRoleBuilder syncs Kubernetes ClusterRoles as Baton resources.
 type clusterRoleBuilder struct {
 	client          kubernetes.Interface
 	bindingProvider clusterRoleBindingProvider
 }
 
-// ResourceType returns the resource type for ClusterRole
+// ResourceType returns the resource type for ClusterRole.
 func (c *clusterRoleBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
 	return resourceTypeClusterRole
 }
 
-// List fetches all ClusterRoles from the Kubernetes API
+// List fetches all ClusterRoles from the Kubernetes API.
 func (c *clusterRoleBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, pToken *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
 	l := ctxzap.Extract(ctx)
 
@@ -76,7 +76,7 @@ func (c *clusterRoleBuilder) List(ctx context.Context, parentResourceID *v2.Reso
 	return rv, nextPageToken, nil, nil
 }
 
-// clusterRoleResource creates a Baton resource from a Kubernetes ClusterRole
+// clusterRoleResource creates a Baton resource from a Kubernetes ClusterRole.
 func clusterRoleResource(clusterRole *rbacv1.ClusterRole) (*v2.Resource, error) {
 	// Prepare profile with standard metadata
 	profile := map[string]interface{}{
@@ -106,7 +106,7 @@ func clusterRoleResource(clusterRole *rbacv1.ClusterRole) (*v2.Resource, error) 
 	return resource, nil
 }
 
-// Entitlements returns entitlements for ClusterRole resources
+// Entitlements returns entitlements for ClusterRole resources.
 func (c *clusterRoleBuilder) Entitlements(ctx context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
 	var entitlements []*v2.Entitlement
 
@@ -153,7 +153,7 @@ func (c *clusterRoleBuilder) Entitlements(ctx context.Context, resource *v2.Reso
 	return entitlements, "", nil, nil
 }
 
-// Grants returns permission grants for ClusterRole resources
+// Grants returns permission grants for ClusterRole resources.
 func (c *clusterRoleBuilder) Grants(ctx context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
 	l := ctxzap.Extract(ctx)
 	var rv []*v2.Grant
@@ -353,7 +353,7 @@ func (c *clusterRoleBuilder) Grants(ctx context.Context, resource *v2.Resource, 
 	return rv, "", nil, nil
 }
 
-// newClusterRoleBuilder creates a new cluster role builder
+// newClusterRoleBuilder creates a new cluster role builder.
 func newClusterRoleBuilder(client kubernetes.Interface, bindingProvider clusterRoleBindingProvider) *clusterRoleBuilder {
 	return &clusterRoleBuilder{
 		client:          client,

@@ -17,17 +17,17 @@ import (
 	"go.uber.org/zap"
 )
 
-// deploymentBuilder syncs Kubernetes Deployments as Baton resources
+// deploymentBuilder syncs Kubernetes Deployments as Baton resources.
 type deploymentBuilder struct {
 	client kubernetes.Interface
 }
 
-// ResourceType returns the resource type for Deployment
+// ResourceType returns the resource type for Deployment.
 func (d *deploymentBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
 	return resourceTypeDeployment
 }
 
-// List fetches all Deployments from the Kubernetes API
+// List fetches all Deployments from the Kubernetes API.
 func (d *deploymentBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, pToken *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
 	l := ctxzap.Extract(ctx)
 
@@ -85,7 +85,7 @@ func (d *deploymentBuilder) List(ctx context.Context, parentResourceID *v2.Resou
 	return rv, nextPageToken, nil, nil
 }
 
-// deploymentResource creates a Baton resource from a Kubernetes Deployment
+// deploymentResource creates a Baton resource from a Kubernetes Deployment.
 func deploymentResource(deployment *appsv1.Deployment) (*v2.Resource, error) {
 	// Create resource ID for the deployment
 	resourceID := deployment.Namespace + "/" + deployment.Name
@@ -121,7 +121,7 @@ func deploymentResource(deployment *appsv1.Deployment) (*v2.Resource, error) {
 	return resource, nil
 }
 
-// Entitlements returns standard verb entitlements for Deployment resources
+// Entitlements returns standard verb entitlements for Deployment resources.
 func (d *deploymentBuilder) Entitlements(ctx context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
 	var entitlements []*v2.Entitlement
 
@@ -163,12 +163,12 @@ func (d *deploymentBuilder) Entitlements(ctx context.Context, resource *v2.Resou
 	return entitlements, "", nil, nil
 }
 
-// Grants returns no grants for Deployment resources
+// Grants returns no grants for Deployment resources.
 func (d *deploymentBuilder) Grants(ctx context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
 	return nil, "", nil, nil
 }
 
-// newDeploymentBuilder creates a new deployment builder
+// newDeploymentBuilder creates a new deployment builder.
 func newDeploymentBuilder(client kubernetes.Interface) *deploymentBuilder {
 	return &deploymentBuilder{
 		client: client,

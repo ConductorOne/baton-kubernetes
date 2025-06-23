@@ -11,7 +11,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 )
 
-// TestRoleBuilderResourceType tests the ResourceType method of the roleBuilder
+// TestRoleBuilderResourceType tests the ResourceType method of the roleBuilder.
 func TestRoleBuilderResourceType(t *testing.T) {
 	// Create a fake client
 	fakeClient := fake.NewSimpleClientset()
@@ -28,7 +28,7 @@ func TestRoleBuilderResourceType(t *testing.T) {
 	assert.Equal(t, resourceTypeRole, resourceType, "Expected ResourceType to return resourceTypeRole")
 }
 
-// TestRoleBuilderEntitlements tests the Entitlements method of the roleBuilder
+// TestRoleBuilderEntitlements tests the Entitlements method of the roleBuilder.
 func TestRoleBuilderEntitlements(t *testing.T) {
 	// Create a fake client
 	fakeClient := fake.NewSimpleClientset()

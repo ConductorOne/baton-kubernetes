@@ -18,7 +18,7 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
-// Standard verb entitlements for Kubernetes resources
+// Standard verb entitlements for Kubernetes resources.
 var standardResourceVerbs = []string{
 	"get",
 	"list",
@@ -29,17 +29,17 @@ var standardResourceVerbs = []string{
 	"delete",
 }
 
-// secretBuilder syncs Kubernetes Secrets as Baton resources
+// secretBuilder syncs Kubernetes Secrets as Baton resources.
 type secretBuilder struct {
 	client kubernetes.Interface
 }
 
-// ResourceType returns the resource type for Secret
+// ResourceType returns the resource type for Secret.
 func (s *secretBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
 	return resourceTypeSecret
 }
 
-// List fetches all Secrets from the Kubernetes API
+// List fetches all Secrets from the Kubernetes API.
 func (s *secretBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, pToken *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
 	l := ctxzap.Extract(ctx)
 
@@ -97,7 +97,7 @@ func (s *secretBuilder) List(ctx context.Context, parentResourceID *v2.ResourceI
 	return rv, nextPageToken, nil, nil
 }
 
-// secretResource creates a Baton resource from a Kubernetes Secret
+// secretResource creates a Baton resource from a Kubernetes Secret.
 func secretResource(secret *corev1.Secret) (*v2.Resource, error) {
 	// Create resource ID for the secret
 	resourceID := secret.Namespace + "/" + secret.Name
@@ -160,7 +160,7 @@ func secretResource(secret *corev1.Secret) (*v2.Resource, error) {
 	return resource, nil
 }
 
-// Entitlements returns standard verb entitlements for Secret resources
+// Entitlements returns standard verb entitlements for Secret resources.
 func (s *secretBuilder) Entitlements(ctx context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
 	var entitlements []*v2.Entitlement
 
@@ -182,12 +182,12 @@ func (s *secretBuilder) Entitlements(ctx context.Context, resource *v2.Resource,
 	return entitlements, "", nil, nil
 }
 
-// Grants returns no grants for Secret resources
+// Grants returns no grants for Secret resources.
 func (s *secretBuilder) Grants(ctx context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
 	return nil, "", nil, nil
 }
 
-// newSecretBuilder creates a new secret builder
+// newSecretBuilder creates a new secret builder.
 func newSecretBuilder(client kubernetes.Interface) *secretBuilder {
 	return &secretBuilder{
 		client: client,

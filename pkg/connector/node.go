@@ -17,17 +17,17 @@ import (
 	"go.uber.org/zap"
 )
 
-// nodeBuilder syncs Kubernetes Nodes as Baton resources
+// nodeBuilder syncs Kubernetes Nodes as Baton resources.
 type nodeBuilder struct {
 	client kubernetes.Interface
 }
 
-// ResourceType returns the resource type for Node
+// ResourceType returns the resource type for Node.
 func (n *nodeBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
 	return resourceTypeNode
 }
 
-// List fetches all Nodes from the Kubernetes API
+// List fetches all Nodes from the Kubernetes API.
 func (n *nodeBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, pToken *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
 	l := ctxzap.Extract(ctx)
 
@@ -84,7 +84,7 @@ func (n *nodeBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId,
 	return rv, nextPageToken, nil, nil
 }
 
-// nodeResource creates a Baton resource from a Kubernetes Node
+// nodeResource creates a Baton resource from a Kubernetes Node.
 func nodeResource(node *corev1.Node) (*v2.Resource, error) {
 	// Create resource options with simplified description
 	options := []rs.ResourceOption{
@@ -110,7 +110,7 @@ func nodeResource(node *corev1.Node) (*v2.Resource, error) {
 	return resource, nil
 }
 
-// Entitlements returns standard verb entitlements for Node resources
+// Entitlements returns standard verb entitlements for Node resources.
 func (n *nodeBuilder) Entitlements(ctx context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
 	var entitlements []*v2.Entitlement
 
@@ -132,12 +132,12 @@ func (n *nodeBuilder) Entitlements(ctx context.Context, resource *v2.Resource, _
 	return entitlements, "", nil, nil
 }
 
-// Grants returns no grants for Node resources
+// Grants returns no grants for Node resources.
 func (n *nodeBuilder) Grants(ctx context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
 	return nil, "", nil, nil
 }
 
-// newNodeBuilder creates a new node builder
+// newNodeBuilder creates a new node builder.
 func newNodeBuilder(client kubernetes.Interface) *nodeBuilder {
 	return &nodeBuilder{
 		client: client,

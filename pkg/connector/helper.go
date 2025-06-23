@@ -37,7 +37,8 @@ func generateWildcardResource(resourceType *v2.ResourceType) (*v2.Resource, erro
 	}
 
 	// Handle different resource types differently to add appropriate traits
-	if resourceType.Id == resourceTypeSecret.Id {
+	switch resourceType.Id {
+	case resourceTypeSecret.Id:
 		// For secrets, use NewSecretResource with SecretTrait
 		secretOptions := []rs.SecretTraitOption{
 			// Set creation time to now
@@ -64,7 +65,7 @@ func generateWildcardResource(resourceType *v2.ResourceType) (*v2.Resource, erro
 			secretOptions,
 			options...,
 		)
-	} else if resourceType.Id == resourceTypeServiceAccount.Id {
+	case resourceTypeServiceAccount.Id:
 		// For service accounts, use NewUserResource with UserTrait
 		userOptions := []rs.UserTraitOption{
 			rs.WithUserProfile(profile),
@@ -78,7 +79,7 @@ func generateWildcardResource(resourceType *v2.ResourceType) (*v2.Resource, erro
 			resourceID,
 			userOptions,
 		)
-	} else if resourceType.Id == resourceTypeRole.Id || resourceType.Id == resourceTypeClusterRole.Id {
+	case resourceTypeRole.Id, resourceTypeClusterRole.Id:
 		// For roles, use NewRoleResource with RoleTrait
 		return rs.NewRoleResource(
 			displayName,
@@ -86,7 +87,7 @@ func generateWildcardResource(resourceType *v2.ResourceType) (*v2.Resource, erro
 			resourceID,
 			[]rs.RoleTraitOption{rs.WithRoleProfile(profile)},
 		)
-	} else {
+	default:
 		// For other resource types, use standard NewResource
 		return rs.NewResource(
 			displayName,

@@ -16,17 +16,17 @@ import (
 	"go.uber.org/zap"
 )
 
-// namespaceBuilder syncs Kubernetes Namespaces as Baton resources
+// namespaceBuilder syncs Kubernetes Namespaces as Baton resources.
 type namespaceBuilder struct {
 	client kubernetes.Interface
 }
 
-// ResourceType returns the resource type for Namespace
+// ResourceType returns the resource type for Namespace.
 func (n *namespaceBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
 	return resourceTypeNamespace
 }
 
-// List fetches all Namespaces from the Kubernetes API
+// List fetches all Namespaces from the Kubernetes API.
 func (n *namespaceBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, pToken *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
 	l := ctxzap.Extract(ctx)
 
@@ -81,7 +81,7 @@ func (n *namespaceBuilder) List(ctx context.Context, parentResourceID *v2.Resour
 	return rv, nextPageToken, nil, nil
 }
 
-// namespaceResource creates a Baton resource from a Kubernetes Namespace
+// namespaceResource creates a Baton resource from a Kubernetes Namespace.
 func namespaceResource(ns *corev1.Namespace) (*v2.Resource, error) {
 	// Prepare profile with standard metadata
 	profile := map[string]interface{}{
@@ -116,17 +116,17 @@ func namespaceResource(ns *corev1.Namespace) (*v2.Resource, error) {
 	return resource, nil
 }
 
-// Entitlements returns no entitlements for Namespace resources
+// Entitlements returns no entitlements for Namespace resources.
 func (n *namespaceBuilder) Entitlements(_ context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
 	return nil, "", nil, nil
 }
 
-// Grants returns no grants for Namespace resources
+// Grants returns no grants for Namespace resources.
 func (n *namespaceBuilder) Grants(_ context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
 	return nil, "", nil, nil
 }
 
-// newNamespaceBuilder creates a new namespace builder
+// newNamespaceBuilder creates a new namespace builder.
 func newNamespaceBuilder(client kubernetes.Interface) *namespaceBuilder {
 	return &namespaceBuilder{
 		client: client,

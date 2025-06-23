@@ -15,7 +15,7 @@ import (
 )
 
 // extractVerbFromEntitlementID extracts the verb from an entitlement ID
-// Format: resource_type:resource:verb
+// Format: resource_type:resource:verb.
 func extractVerbFromEntitlementID(id string) string {
 	parts := strings.Split(id, ":")
 	if len(parts) < 3 {
@@ -24,31 +24,31 @@ func extractVerbFromEntitlementID(id string) string {
 	return parts[2]
 }
 
-// mockRoleBindingProvider implements the roleBindingProvider interface for testing
+// mockRoleBindingProvider implements the roleBindingProvider interface for testing.
 type mockRoleBindingProvider struct {
 	roleBindingsMap map[string][]rbacv1.RoleBinding // key: namespace/roleName
 }
 
-// GetMatchingRoleBindings returns mock role bindings for testing
+// GetMatchingRoleBindings returns mock role bindings for testing.
 func (m *mockRoleBindingProvider) GetMatchingRoleBindings(ctx context.Context, namespace, roleName string) ([]rbacv1.RoleBinding, error) {
 	key := namespace + "/" + roleName
 	return m.roleBindingsMap[key], nil
 }
 
-// newMockRoleBindingProvider creates a new mock binding provider
+// newMockRoleBindingProvider creates a new mock binding provider.
 func newMockRoleBindingProvider() *mockRoleBindingProvider {
 	return &mockRoleBindingProvider{
 		roleBindingsMap: make(map[string][]rbacv1.RoleBinding),
 	}
 }
 
-// addMockBinding adds a role binding to the mock provider
+// addMockBinding adds a role binding to the mock provider.
 func (m *mockRoleBindingProvider) addMockBinding(namespace, roleName string, binding rbacv1.RoleBinding) {
 	key := namespace + "/" + roleName
 	m.roleBindingsMap[key] = append(m.roleBindingsMap[key], binding)
 }
 
-// TestRoleBuilderList tests the List method
+// TestRoleBuilderList tests the List method.
 func TestRoleBuilderList(t *testing.T) {
 	// We'll focus on a simpler approach: directly testing the roleResource
 	// function conversion instead of the List method which has issues with the
@@ -80,7 +80,7 @@ func TestRoleBuilderList(t *testing.T) {
 	assert.Equal(t, resourceTypeRole.Id, resource.Id.ResourceType)
 }
 
-// TestRoleBuilderGrants_NoBindings tests that a role without bindings produces no grants
+// TestRoleBuilderGrants_NoBindings tests that a role without bindings produces no grants.
 func TestRoleBuilderGrants_NoBindings(t *testing.T) {
 	// Setup test role
 	role := &rbacv1.Role{
@@ -125,7 +125,7 @@ func TestRoleBuilderGrants_NoBindings(t *testing.T) {
 	assert.Empty(t, grants, "A role without bindings should produce no grants")
 }
 
-// TestRoleBuilderGrants_WithBindings tests grants with role bindings
+// TestRoleBuilderGrants_WithBindings tests grants with role bindings.
 func TestRoleBuilderGrants_WithBindings(t *testing.T) {
 	// Setup test role
 	role := &rbacv1.Role{
@@ -251,7 +251,7 @@ func TestRoleBuilderGrants_WithBindings(t *testing.T) {
 	assert.Equal(t, 2, verbCounts["watch"], "Should have 2 watch grants (1 per subject)")
 }
 
-// TestRoleBuilderGrants_WildcardVerbs tests handling of wildcard verbs with bindings
+// TestRoleBuilderGrants_WildcardVerbs tests handling of wildcard verbs with bindings.
 func TestRoleBuilderGrants_WildcardVerbs(t *testing.T) {
 	// Setup test role with wildcard verb
 	role := &rbacv1.Role{
@@ -342,7 +342,7 @@ func TestRoleBuilderGrants_WildcardVerbs(t *testing.T) {
 	}
 }
 
-// TestRoleBuilderGrants_MultipleResources tests grants with multiple resources in a rule
+// TestRoleBuilderGrants_MultipleResources tests grants with multiple resources in a rule.
 func TestRoleBuilderGrants_MultipleResources(t *testing.T) {
 	// Setup test role with multiple resources
 	role := &rbacv1.Role{
@@ -442,7 +442,7 @@ func TestRoleBuilderGrants_MultipleResources(t *testing.T) {
 }
 
 // extractTargetFromEntitlement extracts the target resource type and resource from an entitlement ID
-// Format: resource_type:resource:verb
+// Format: resource_type:resource:verb.
 func extractTargetFromEntitlement(id string) (string, string) {
 	parts := strings.Split(id, ":")
 	if len(parts) < 2 {
