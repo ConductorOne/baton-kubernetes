@@ -1,144 +1,144 @@
 {
-  "@type":  "type.googleapis.com/c1.connector.v2.ConnectorCapabilities",
-  "resourceTypeCapabilities":  [
+  "@type": "type.googleapis.com/c1.connector.v2.ConnectorCapabilities",
+  "resourceTypeCapabilities": [
     {
-      "resourceType":  {
-        "id":  "cluster_role",
-        "displayName":  "Cluster Role",
-        "traits":  [
+      "resourceType": {
+        "id": "cluster_role",
+        "displayName": "Cluster Role",
+        "traits": [
           "TRAIT_ROLE"
         ]
       },
-      "capabilities":  [
+      "capabilities": [
         "CAPABILITY_SYNC"
       ]
     },
     {
-      "resourceType":  {
-        "id":  "configmap",
-        "displayName":  "Config Map"
+      "resourceType": {
+        "id": "configmap",
+        "displayName": "Config Map"
       },
-      "capabilities":  [
+      "capabilities": [
         "CAPABILITY_SYNC"
       ]
     },
     {
-      "resourceType":  {
-        "id":  "daemonset",
-        "displayName":  "Daemon Set"
+      "resourceType": {
+        "id": "daemonset",
+        "displayName": "Daemon Set"
       },
-      "capabilities":  [
+      "capabilities": [
         "CAPABILITY_SYNC"
       ]
     },
     {
-      "resourceType":  {
-        "id":  "deployment",
-        "displayName":  "Deployment"
+      "resourceType": {
+        "id": "deployment",
+        "displayName": "Deployment"
       },
-      "capabilities":  [
+      "capabilities": [
         "CAPABILITY_SYNC"
       ]
     },
     {
-      "resourceType":  {
-        "id":  "kube_group",
-        "displayName":  "Kubernetes Group",
-        "traits":  [
+      "resourceType": {
+        "id": "kube_group",
+        "displayName": "Kubernetes Group",
+        "traits": [
           "TRAIT_GROUP"
         ]
       },
-      "capabilities":  [
+      "capabilities": [
         "CAPABILITY_SYNC"
       ]
     },
     {
-      "resourceType":  {
-        "id":  "kube_user",
-        "displayName":  "Kubernetes User",
-        "traits":  [
+      "resourceType": {
+        "id": "kube_user",
+        "displayName": "Kubernetes User",
+        "traits": [
           "TRAIT_USER"
         ]
       },
-      "capabilities":  [
+      "capabilities": [
         "CAPABILITY_SYNC"
       ]
     },
     {
-      "resourceType":  {
-        "id":  "namespace",
-        "displayName":  "Namespace"
+      "resourceType": {
+        "id": "namespace",
+        "displayName": "Namespace"
       },
-      "capabilities":  [
+      "capabilities": [
         "CAPABILITY_SYNC"
       ]
     },
     {
-      "resourceType":  {
-        "id":  "node",
-        "displayName":  "Node"
+      "resourceType": {
+        "id": "node",
+        "displayName": "Node"
       },
-      "capabilities":  [
+      "capabilities": [
         "CAPABILITY_SYNC"
       ]
     },
     {
-      "resourceType":  {
-        "id":  "pod",
-        "displayName":  "Pod"
+      "resourceType": {
+        "id": "pod",
+        "displayName": "Pod"
       },
-      "capabilities":  [
+      "capabilities": [
         "CAPABILITY_SYNC"
       ]
     },
     {
-      "resourceType":  {
-        "id":  "role",
-        "displayName":  "Role",
-        "traits":  [
+      "resourceType": {
+        "id": "role",
+        "displayName": "Role",
+        "traits": [
           "TRAIT_ROLE"
         ]
       },
-      "capabilities":  [
+      "capabilities": [
         "CAPABILITY_SYNC"
       ]
     },
     {
-      "resourceType":  {
-        "id":  "secret",
-        "displayName":  "Secret",
-        "traits":  [
+      "resourceType": {
+        "id": "secret",
+        "displayName": "Secret",
+        "traits": [
           "TRAIT_SECRET"
         ]
       },
-      "capabilities":  [
+      "capabilities": [
         "CAPABILITY_SYNC"
       ]
     },
     {
-      "resourceType":  {
-        "id":  "service_account",
-        "displayName":  "Service Account",
-        "traits":  [
+      "resourceType": {
+        "id": "service_account",
+        "displayName": "Service Account",
+        "traits": [
           "TRAIT_USER"
         ]
       },
-      "capabilities":  [
+      "capabilities": [
         "CAPABILITY_SYNC"
       ]
     },
     {
-      "resourceType":  {
-        "id":  "statefulset",
-        "displayName":  "Stateful Set"
+      "resourceType": {
+        "id": "statefulset",
+        "displayName": "Stateful Set"
       },
-      "capabilities":  [
+      "capabilities": [
         "CAPABILITY_SYNC"
       ]
     }
   ],
-  "connectorCapabilities":  [
+  "connectorCapabilities": [
     "CAPABILITY_SYNC"
   ],
-  "credentialDetails":  {}
+  "credentialDetails": {}
 }
