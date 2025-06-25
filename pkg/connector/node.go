@@ -24,7 +24,7 @@ type nodeBuilder struct {
 
 // ResourceType returns the resource type for Node.
 func (n *nodeBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
-	return resourceTypeNode
+	return ResourceTypeNode
 }
 
 // List fetches all Nodes from the Kubernetes API.
@@ -35,14 +35,14 @@ func (n *nodeBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId,
 	var rv []*v2.Resource
 
 	// Parse pagination token
-	bag, err := parsePageToken(pToken.Token)
+	bag, err := ParsePageToken(pToken.Token)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("failed to parse page token: %w", err)
 	}
 
 	// Add wildcard resource first, but only on the first page (when page token is empty)
 	if bag.PageToken() == "" {
-		wildcardResource, err := generateWildcardResource(resourceTypeNode)
+		wildcardResource, err := generateWildcardResource(ResourceTypeNode)
 		if err != nil {
 			l.Error("failed to create wildcard resource for nodes", zap.Error(err))
 		} else {
@@ -76,7 +76,7 @@ func (n *nodeBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId,
 	}
 
 	// Calculate next page token
-	nextPageToken, err := handleKubePagination(&resp.ListMeta, bag)
+	nextPageToken, err := HandleKubePagination(&resp.ListMeta, bag)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("failed to handle pagination: %w", err)
 	}
@@ -99,7 +99,7 @@ func nodeResource(node *corev1.Node) (*v2.Resource, error) {
 	// Create resource
 	resource, err := rs.NewResource(
 		node.Name,
-		resourceTypeNode,
+		ResourceTypeNode,
 		node.Name,
 		options...,
 	)
@@ -122,8 +122,8 @@ func (n *nodeBuilder) Entitlements(ctx context.Context, resource *v2.Resource, _
 			entitlement.WithDisplayName(fmt.Sprintf("%s %s", verb, resource.DisplayName)),
 			entitlement.WithDescription(fmt.Sprintf("Grants %s permission on the %s node", verb, resource.DisplayName)),
 			entitlement.WithGrantableTo(
-				resourceTypeRole,
-				resourceTypeClusterRole,
+				ResourceTypeRole,
+				ResourceTypeClusterRole,
 			),
 		)
 		entitlements = append(entitlements, ent)

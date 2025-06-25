@@ -24,7 +24,7 @@ type podBuilder struct {
 
 // ResourceType returns the resource type for Pod.
 func (p *podBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
-	return resourceTypePod
+	return ResourceTypePod
 }
 
 // List fetches all Pods from the Kubernetes API.
@@ -35,14 +35,14 @@ func (p *podBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, 
 	var rv []*v2.Resource
 
 	// Parse pagination token
-	bag, err := parsePageToken(pToken.Token)
+	bag, err := ParsePageToken(pToken.Token)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("failed to parse page token: %w", err)
 	}
 
 	// Add wildcard resource first, but only on the first page (when page token is empty)
 	if bag.PageToken() == "" {
-		wildcardResource, err := generateWildcardResource(resourceTypePod)
+		wildcardResource, err := generateWildcardResource(ResourceTypePod)
 		if err != nil {
 			l.Error("failed to create wildcard resource for pods", zap.Error(err))
 		} else {
@@ -77,7 +77,7 @@ func (p *podBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, 
 	}
 
 	// Calculate next page token
-	nextPageToken, err := handleKubePagination(&resp.ListMeta, bag)
+	nextPageToken, err := HandleKubePagination(&resp.ListMeta, bag)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("failed to handle pagination: %w", err)
 	}
@@ -88,7 +88,7 @@ func (p *podBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, 
 // podResource creates a Baton resource from a Kubernetes Pod.
 func podResource(pod *corev1.Pod) (*v2.Resource, error) {
 	// Get parent namespace resource ID
-	parentID, err := namespaceResourceID(pod.Namespace)
+	parentID, err := NamespaceResourceID(pod.Namespace)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create parent resource ID: %w", err)
 	}
@@ -110,7 +110,7 @@ func podResource(pod *corev1.Pod) (*v2.Resource, error) {
 	// Create resource
 	resource, err := rs.NewResource(
 		pod.Name,
-		resourceTypePod,
+		ResourceTypePod,
 		rawID, // Pass the raw ID directly
 		options...,
 	)
@@ -133,8 +133,8 @@ func (p *podBuilder) Entitlements(ctx context.Context, resource *v2.Resource, _ 
 			entitlement.WithDisplayName(fmt.Sprintf("%s %s", verb, resource.DisplayName)),
 			entitlement.WithDescription(fmt.Sprintf("Grants %s permission on the %s pod", verb, resource.DisplayName)),
 			entitlement.WithGrantableTo(
-				resourceTypeRole,
-				resourceTypeClusterRole,
+				ResourceTypeRole,
+				ResourceTypeClusterRole,
 			),
 		)
 		entitlements = append(entitlements, ent)
@@ -147,8 +147,8 @@ func (p *podBuilder) Entitlements(ctx context.Context, resource *v2.Resource, _ 
 		entitlement.WithDisplayName(fmt.Sprintf("exec %s", resource.DisplayName)),
 		entitlement.WithDescription(fmt.Sprintf("Grants execution permission on the %s pod", resource.DisplayName)),
 		entitlement.WithGrantableTo(
-			resourceTypeRole,
-			resourceTypeClusterRole,
+			ResourceTypeRole,
+			ResourceTypeClusterRole,
 		),
 	)
 	entitlements = append(entitlements, execEntitlement)
@@ -159,8 +159,8 @@ func (p *podBuilder) Entitlements(ctx context.Context, resource *v2.Resource, _ 
 		entitlement.WithDisplayName(fmt.Sprintf("port-forward %s", resource.DisplayName)),
 		entitlement.WithDescription(fmt.Sprintf("Grants port-forward permission on the %s pod", resource.DisplayName)),
 		entitlement.WithGrantableTo(
-			resourceTypeRole,
-			resourceTypeClusterRole,
+			ResourceTypeRole,
+			ResourceTypeClusterRole,
 		),
 	)
 	entitlements = append(entitlements, portForwardEntitlement)

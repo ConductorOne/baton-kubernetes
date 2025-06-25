@@ -61,7 +61,7 @@ func getConnector(ctx context.Context, v *viper.Viper) (types.ConnectorServer, e
 		return nil, fmt.Errorf("failed to create Kubernetes REST config: unexpectedly got nil config")
 	}
 
-	cb, err := connector.New(ctx, restConfig, connector.WithSyncPods(false))
+	cb, err := connector.New(ctx, restConfig)
 	if err != nil {
 		l.Error("error creating connector", zap.Error(err))
 		return nil, err

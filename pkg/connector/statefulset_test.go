@@ -55,11 +55,11 @@ func TestStatefulSetResource(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resource)
 	assert.Equal(t, "test-statefulset", resource.DisplayName)
-	assert.Equal(t, resourceTypeStatefulSet.Id, resource.Id.ResourceType)
+	assert.Equal(t, ResourceTypeStatefulSet.Id, resource.Id.ResourceType)
 	assert.Equal(t, "test-namespace/test-statefulset", resource.Id.Resource)
 
 	// Check that the resource has the correct parent ID
-	parentID, err := namespaceResourceID("test-namespace")
+	parentID, err := NamespaceResourceID("test-namespace")
 	require.NoError(t, err)
 	assert.Equal(t, parentID, resource.ParentResourceId)
 
@@ -121,7 +121,7 @@ func TestStatefulSetBuilderList(t *testing.T) {
 		switch {
 		case res.Id.Resource == "*":
 			wildcardResourceFound = true
-			assert.Equal(t, resourceTypeStatefulSet.Id, res.Id.ResourceType)
+			assert.Equal(t, ResourceTypeStatefulSet.Id, res.Id.ResourceType)
 			assert.Contains(t, res.DisplayName, "All")
 		case res.DisplayName == "test-statefulset-1":
 			foundSts1 = true
@@ -149,7 +149,7 @@ func TestStatefulSetBuilderEntitlements(t *testing.T) {
 	// Create a test resource
 	testResource := &v2.Resource{
 		Id: &v2.ResourceId{
-			ResourceType: resourceTypeStatefulSet.Id,
+			ResourceType: ResourceTypeStatefulSet.Id,
 			Resource:     "test-namespace/test-statefulset",
 		},
 		DisplayName: "test-statefulset",
@@ -195,7 +195,7 @@ func TestStatefulSetBuilderGrants(t *testing.T) {
 	// Create a test resource
 	testResource := &v2.Resource{
 		Id: &v2.ResourceId{
-			ResourceType: resourceTypeStatefulSet.Id,
+			ResourceType: ResourceTypeStatefulSet.Id,
 			Resource:     "test-namespace/test-statefulset",
 		},
 		DisplayName: "test-statefulset",

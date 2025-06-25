@@ -24,7 +24,7 @@ type statefulSetBuilder struct {
 
 // ResourceType returns the resource type for StatefulSet.
 func (s *statefulSetBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
-	return resourceTypeStatefulSet
+	return ResourceTypeStatefulSet
 }
 
 // List fetches all StatefulSets from the Kubernetes API.
@@ -35,14 +35,14 @@ func (s *statefulSetBuilder) List(ctx context.Context, parentResourceID *v2.Reso
 	var rv []*v2.Resource
 
 	// Parse pagination token
-	bag, err := parsePageToken(pToken.Token)
+	bag, err := ParsePageToken(pToken.Token)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("failed to parse page token: %w", err)
 	}
 
 	// Add wildcard resource first, but only on the first page (when page token is empty)
 	if bag.PageToken() == "" {
-		wildcardResource, err := generateWildcardResource(resourceTypeStatefulSet)
+		wildcardResource, err := generateWildcardResource(ResourceTypeStatefulSet)
 		if err != nil {
 			l.Error("failed to create wildcard resource for statefulsets", zap.Error(err))
 		} else {
@@ -77,7 +77,7 @@ func (s *statefulSetBuilder) List(ctx context.Context, parentResourceID *v2.Reso
 	}
 
 	// Calculate next page token
-	nextPageToken, err := handleKubePagination(&resp.ListMeta, bag)
+	nextPageToken, err := HandleKubePagination(&resp.ListMeta, bag)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("failed to handle pagination: %w", err)
 	}
@@ -88,7 +88,7 @@ func (s *statefulSetBuilder) List(ctx context.Context, parentResourceID *v2.Reso
 // statefulSetResource creates a Baton resource from a Kubernetes StatefulSet.
 func statefulSetResource(statefulset *appsv1.StatefulSet) (*v2.Resource, error) {
 	// Get parent namespace resource ID
-	parentID, err := namespaceResourceID(statefulset.Namespace)
+	parentID, err := NamespaceResourceID(statefulset.Namespace)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create parent resource ID: %w", err)
 	}
@@ -110,7 +110,7 @@ func statefulSetResource(statefulset *appsv1.StatefulSet) (*v2.Resource, error) 
 	// Create resource
 	resource, err := rs.NewResource(
 		statefulset.Name,
-		resourceTypeStatefulSet,
+		ResourceTypeStatefulSet,
 		rawID, // Pass the raw ID directly
 		options...,
 	)
@@ -133,8 +133,8 @@ func (s *statefulSetBuilder) Entitlements(ctx context.Context, resource *v2.Reso
 			entitlement.WithDisplayName(fmt.Sprintf("%s %s", verb, resource.DisplayName)),
 			entitlement.WithDescription(fmt.Sprintf("Grants %s permission on the %s statefulset", verb, resource.DisplayName)),
 			entitlement.WithGrantableTo(
-				resourceTypeRole,
-				resourceTypeClusterRole,
+				ResourceTypeRole,
+				ResourceTypeClusterRole,
 			),
 		)
 		entitlements = append(entitlements, ent)
@@ -152,8 +152,8 @@ func (s *statefulSetBuilder) Entitlements(ctx context.Context, resource *v2.Reso
 			entitlement.WithDisplayName(fmt.Sprintf("%s %s", verb, resource.DisplayName)),
 			entitlement.WithDescription(fmt.Sprintf("Grants %s permission on the %s statefulset", verb, resource.DisplayName)),
 			entitlement.WithGrantableTo(
-				resourceTypeRole,
-				resourceTypeClusterRole,
+				ResourceTypeRole,
+				ResourceTypeClusterRole,
 			),
 		)
 		entitlements = append(entitlements, ent)

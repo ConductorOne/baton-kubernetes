@@ -24,7 +24,7 @@ type configMapBuilder struct {
 
 // ResourceType returns the resource type for ConfigMap.
 func (c *configMapBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
-	return resourceTypeConfigMap
+	return ResourceTypeConfigMap
 }
 
 // List fetches all ConfigMaps from the Kubernetes API.
@@ -35,14 +35,14 @@ func (c *configMapBuilder) List(ctx context.Context, parentResourceID *v2.Resour
 	var rv []*v2.Resource
 
 	// Parse pagination token
-	bag, err := parsePageToken(pToken.Token)
+	bag, err := ParsePageToken(pToken.Token)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("failed to parse page token: %w", err)
 	}
 
 	// Add wildcard resource first, but only on the first page (when page token is empty)
 	if bag.PageToken() == "" {
-		wildcardResource, err := generateWildcardResource(resourceTypeConfigMap)
+		wildcardResource, err := generateWildcardResource(ResourceTypeConfigMap)
 		if err != nil {
 			l.Error("failed to create wildcard resource for configmaps", zap.Error(err))
 		} else {
@@ -77,7 +77,7 @@ func (c *configMapBuilder) List(ctx context.Context, parentResourceID *v2.Resour
 	}
 
 	// Calculate next page token
-	nextPageToken, err := handleKubePagination(&resp.ListMeta, bag)
+	nextPageToken, err := HandleKubePagination(&resp.ListMeta, bag)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("failed to handle pagination: %w", err)
 	}
@@ -88,7 +88,7 @@ func (c *configMapBuilder) List(ctx context.Context, parentResourceID *v2.Resour
 // configMapResource creates a Baton resource from a Kubernetes ConfigMap.
 func configMapResource(cm *corev1.ConfigMap) (*v2.Resource, error) {
 	// Get parent namespace resource ID
-	parentID, err := namespaceResourceID(cm.Namespace)
+	parentID, err := NamespaceResourceID(cm.Namespace)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create parent resource ID: %w", err)
 	}
@@ -110,7 +110,7 @@ func configMapResource(cm *corev1.ConfigMap) (*v2.Resource, error) {
 	// Create resource
 	resource, err := rs.NewResource(
 		cm.Name,
-		resourceTypeConfigMap,
+		ResourceTypeConfigMap,
 		rawID, // Pass the raw ID directly
 		options...,
 	)
@@ -133,8 +133,8 @@ func (c *configMapBuilder) Entitlements(ctx context.Context, resource *v2.Resour
 			entitlement.WithDisplayName(fmt.Sprintf("%s %s", verb, resource.DisplayName)),
 			entitlement.WithDescription(fmt.Sprintf("Grants %s permission on the %s configmap", verb, resource.DisplayName)),
 			entitlement.WithGrantableTo(
-				resourceTypeRole,
-				resourceTypeClusterRole,
+				ResourceTypeRole,
+				ResourceTypeClusterRole,
 			),
 		)
 		entitlements = append(entitlements, ent)

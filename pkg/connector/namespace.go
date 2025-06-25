@@ -23,7 +23,7 @@ type namespaceBuilder struct {
 
 // ResourceType returns the resource type for Namespace.
 func (n *namespaceBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
-	return resourceTypeNamespace
+	return ResourceTypeNamespace
 }
 
 // List fetches all Namespaces from the Kubernetes API.
@@ -34,14 +34,14 @@ func (n *namespaceBuilder) List(ctx context.Context, parentResourceID *v2.Resour
 	var rv []*v2.Resource
 
 	// Parse pagination token
-	bag, err := parsePageToken(pToken.Token)
+	bag, err := ParsePageToken(pToken.Token)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("failed to parse page token: %w", err)
 	}
 
 	// Add wildcard resource first, but only on the first page (when page token is empty)
 	if bag.PageToken() == "" {
-		wildcardResource, err := generateWildcardResource(resourceTypeNamespace)
+		wildcardResource, err := generateWildcardResource(ResourceTypeNamespace)
 		if err != nil {
 			l.Error("failed to create wildcard resource for namespaces", zap.Error(err))
 		} else {
@@ -73,7 +73,7 @@ func (n *namespaceBuilder) List(ctx context.Context, parentResourceID *v2.Resour
 	}
 
 	// Calculate next page token
-	nextPageToken, err := handleKubePagination(&resp.ListMeta, bag)
+	nextPageToken, err := HandleKubePagination(&resp.ListMeta, bag)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("failed to handle pagination: %w", err)
 	}
@@ -99,13 +99,13 @@ func namespaceResource(ns *corev1.Namespace) (*v2.Resource, error) {
 
 	// Create resource with options
 	options := []rs.ResourceOption{
-		rs.WithAnnotation(&v2.ChildResourceType{ResourceTypeId: resourceTypeServiceAccount.Id}),
+		rs.WithAnnotation(&v2.ChildResourceType{ResourceTypeId: ResourceTypeServiceAccount.Id}),
 	}
 
 	// Pass the raw name as the object ID
 	resource, err := rs.NewResource(
 		ns.Name,
-		resourceTypeNamespace,
+		ResourceTypeNamespace,
 		ns.Name, // Just pass the raw name as the object ID
 		options...,
 	)

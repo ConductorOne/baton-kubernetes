@@ -24,7 +24,7 @@ type serviceAccountBuilder struct {
 
 // ResourceType returns the resource type for ServiceAccount.
 func (s *serviceAccountBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
-	return resourceTypeServiceAccount
+	return ResourceTypeServiceAccount
 }
 
 // List fetches all ServiceAccounts from the Kubernetes API.
@@ -35,14 +35,14 @@ func (s *serviceAccountBuilder) List(ctx context.Context, parentResourceID *v2.R
 	var rv []*v2.Resource
 
 	// Parse pagination token
-	bag, err := parsePageToken(pToken.Token)
+	bag, err := ParsePageToken(pToken.Token)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("failed to parse page token: %w", err)
 	}
 
 	// Add wildcard resource first, but only on the first page (when page token is empty)
 	if bag.PageToken() == "" {
-		wildcardResource, err := generateWildcardResource(resourceTypeServiceAccount)
+		wildcardResource, err := generateWildcardResource(ResourceTypeServiceAccount)
 		if err != nil {
 			l.Error("failed to create wildcard resource for service accounts", zap.Error(err))
 		} else {
@@ -77,7 +77,7 @@ func (s *serviceAccountBuilder) List(ctx context.Context, parentResourceID *v2.R
 	}
 
 	// Calculate next page token
-	nextPageToken, err := handleKubePagination(&resp.ListMeta, bag)
+	nextPageToken, err := HandleKubePagination(&resp.ListMeta, bag)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("failed to handle pagination: %w", err)
 	}
@@ -116,7 +116,7 @@ func serviceAccountResource(serviceAccount *corev1.ServiceAccount) (*v2.Resource
 	}
 
 	// Get parent namespace resource ID
-	parentID, err := namespaceResourceID(serviceAccount.Namespace)
+	parentID, err := NamespaceResourceID(serviceAccount.Namespace)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create parent resource ID: %w", err)
 	}
@@ -127,7 +127,7 @@ func serviceAccountResource(serviceAccount *corev1.ServiceAccount) (*v2.Resource
 	// Create resource with parent namespace
 	resource, err := rs.NewUserResource(
 		serviceAccount.Name,
-		resourceTypeServiceAccount,
+		ResourceTypeServiceAccount,
 		rawID,
 		[]rs.UserTraitOption{rs.WithUserProfile(profile)},
 		rs.WithParentResourceID(parentID),
@@ -148,8 +148,8 @@ func (s *serviceAccountBuilder) Entitlements(_ context.Context, resource *v2.Res
 		entitlement.WithDisplayName(fmt.Sprintf("Impersonate %s", resource.DisplayName)),
 		entitlement.WithDescription(fmt.Sprintf("Grants the ability to impersonate the %s service account", resource.DisplayName)),
 		entitlement.WithGrantableTo(
-			resourceTypeRole,
-			resourceTypeClusterRole,
+			ResourceTypeRole,
+			ResourceTypeClusterRole,
 		),
 	)
 

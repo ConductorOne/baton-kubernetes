@@ -36,7 +36,7 @@ type secretBuilder struct {
 
 // ResourceType returns the resource type for Secret.
 func (s *secretBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
-	return resourceTypeSecret
+	return ResourceTypeSecret
 }
 
 // List fetches all Secrets from the Kubernetes API.
@@ -47,14 +47,14 @@ func (s *secretBuilder) List(ctx context.Context, parentResourceID *v2.ResourceI
 	var rv []*v2.Resource
 
 	// Parse pagination token
-	bag, err := parsePageToken(pToken.Token)
+	bag, err := ParsePageToken(pToken.Token)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("failed to parse page token: %w", err)
 	}
 
 	// Add wildcard resource first, but only on the first page (when page token is empty)
 	if bag.PageToken() == "" {
-		wildcardResource, err := generateWildcardResource(resourceTypeSecret)
+		wildcardResource, err := generateWildcardResource(ResourceTypeSecret)
 		if err != nil {
 			l.Error("failed to create wildcard resource for secrets", zap.Error(err))
 		} else {
@@ -89,7 +89,7 @@ func (s *secretBuilder) List(ctx context.Context, parentResourceID *v2.ResourceI
 	}
 
 	// Calculate next page token
-	nextPageToken, err := handleKubePagination(&resp.ListMeta, bag)
+	nextPageToken, err := HandleKubePagination(&resp.ListMeta, bag)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("failed to handle pagination: %w", err)
 	}
@@ -103,7 +103,7 @@ func secretResource(secret *corev1.Secret) (*v2.Resource, error) {
 	resourceID := secret.Namespace + "/" + secret.Name
 
 	// Get parent namespace resource ID
-	parentID, err := namespaceResourceID(secret.Namespace)
+	parentID, err := NamespaceResourceID(secret.Namespace)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create parent resource ID: %w", err)
 	}
@@ -148,7 +148,7 @@ func secretResource(secret *corev1.Secret) (*v2.Resource, error) {
 	// Create resource with secret trait
 	resource, err := rs.NewSecretResource(
 		secret.Name,
-		resourceTypeSecret,
+		ResourceTypeSecret,
 		resourceID,
 		secretOptions,
 		options...,
@@ -172,8 +172,8 @@ func (s *secretBuilder) Entitlements(ctx context.Context, resource *v2.Resource,
 			entitlement.WithDisplayName(fmt.Sprintf("%s %s", verb, resource.DisplayName)),
 			entitlement.WithDescription(fmt.Sprintf("Grants %s permission on the %s secret", verb, resource.DisplayName)),
 			entitlement.WithGrantableTo(
-				resourceTypeRole,
-				resourceTypeClusterRole,
+				ResourceTypeRole,
+				ResourceTypeClusterRole,
 			),
 		)
 		entitlements = append(entitlements, ent)
