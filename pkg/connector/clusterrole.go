@@ -25,7 +25,7 @@ const clusterScopedMember = "all:member"
 // clusterRoleBuilder syncs Kubernetes ClusterRoles as Baton resources.
 type clusterRoleBuilder struct {
 	client          kubernetes.Interface
-	bindingProvider clusterRoleBindingProvider
+	bindingProvider ClusterRoleBindingProvider
 	// Cached namespaces
 	cachedNamespaces []string
 	nsMutex          sync.Mutex
@@ -253,7 +253,7 @@ func (c *clusterRoleBuilder) cacheNamespaces(ctx context.Context) error {
 }
 
 // newClusterRoleBuilder creates a new cluster role builder.
-func newClusterRoleBuilder(client kubernetes.Interface, bindingProvider clusterRoleBindingProvider) *clusterRoleBuilder {
+func newClusterRoleBuilder(client kubernetes.Interface, bindingProvider ClusterRoleBindingProvider) *clusterRoleBuilder {
 	return &clusterRoleBuilder{
 		client:          client,
 		bindingProvider: bindingProvider,
