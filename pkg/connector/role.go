@@ -21,7 +21,7 @@ import (
 // roleBuilder syncs Kubernetes Roles as Baton resources.
 type roleBuilder struct {
 	client          kubernetes.Interface
-	bindingProvider roleBindingProvider
+	bindingProvider RoleBindingProvider
 }
 
 // ResourceType returns the resource type for Role.
@@ -194,7 +194,7 @@ func (r *roleBuilder) Grants(ctx context.Context, resource *v2.Resource, _ *pagi
 }
 
 // newRoleBuilder creates a new role builder.
-func newRoleBuilder(client kubernetes.Interface, bindingProvider roleBindingProvider) *roleBuilder {
+func newRoleBuilder(client kubernetes.Interface, bindingProvider RoleBindingProvider) *roleBuilder {
 	return &roleBuilder{
 		client:          client,
 		bindingProvider: bindingProvider,
