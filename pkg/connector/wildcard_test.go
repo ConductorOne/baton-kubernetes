@@ -16,47 +16,47 @@ func TestWildcardResources(t *testing.T) {
 	}{
 		{
 			name:         "Secret wildcard",
-			resourceType: resourceTypeSecret,
+			resourceType: ResourceTypeSecret,
 		},
 		{
 			name:         "ServiceAccount wildcard",
-			resourceType: resourceTypeServiceAccount,
+			resourceType: ResourceTypeServiceAccount,
 		},
 		{
 			name:         "Role wildcard",
-			resourceType: resourceTypeRole,
+			resourceType: ResourceTypeRole,
 		},
 		{
 			name:         "ClusterRole wildcard",
-			resourceType: resourceTypeClusterRole,
+			resourceType: ResourceTypeClusterRole,
 		},
 		{
 			name:         "Pod wildcard",
-			resourceType: resourceTypePod,
+			resourceType: ResourceTypePod,
 		},
 		{
 			name:         "Node wildcard",
-			resourceType: resourceTypeNode,
+			resourceType: ResourceTypeNode,
 		},
 		{
 			name:         "Namespace wildcard",
-			resourceType: resourceTypeNamespace,
+			resourceType: ResourceTypeNamespace,
 		},
 		{
 			name:         "ConfigMap wildcard",
-			resourceType: resourceTypeConfigMap,
+			resourceType: ResourceTypeConfigMap,
 		},
 		{
 			name:         "DaemonSet wildcard",
-			resourceType: resourceTypeDaemonSet,
+			resourceType: ResourceTypeDaemonSet,
 		},
 		{
 			name:         "Deployment wildcard",
-			resourceType: resourceTypeDeployment,
+			resourceType: ResourceTypeDeployment,
 		},
 		{
 			name:         "StatefulSet wildcard",
-			resourceType: resourceTypeStatefulSet,
+			resourceType: ResourceTypeStatefulSet,
 		},
 	}
 

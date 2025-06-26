@@ -27,7 +27,7 @@ type kubeUserBuilder struct {
 
 // ResourceType returns the resource type for KubeUser.
 func (k *kubeUserBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
-	return resourceTypeKubeUser
+	return ResourceTypeKubeUser
 }
 
 // List extracts unique users from RBAC bindings and creates Baton user resources.
@@ -43,7 +43,7 @@ func (k *kubeUserBuilder) List(ctx context.Context, parentResourceID *v2.Resourc
 	k.userCacheLock.Unlock()
 
 	// Parse pagination token
-	bag, err := parsePageToken(pToken.Token)
+	bag, err := ParsePageToken(pToken.Token)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("failed to parse page token: %w", err)
 	}
@@ -177,7 +177,7 @@ func (k *kubeUserBuilder) kubeUserResource(username string) (*v2.Resource, error
 	// Create user resource
 	resource, err := rs.NewUserResource(
 		username,
-		resourceTypeKubeUser,
+		ResourceTypeKubeUser,
 		username,
 		userOptions,
 	)
@@ -197,8 +197,8 @@ func (k *kubeUserBuilder) Entitlements(_ context.Context, resource *v2.Resource,
 		entitlement.WithDisplayName(fmt.Sprintf("Impersonate %s", resource.DisplayName)),
 		entitlement.WithDescription(fmt.Sprintf("Grants the ability to impersonate the %s user", resource.DisplayName)),
 		entitlement.WithGrantableTo(
-			resourceTypeRole,
-			resourceTypeClusterRole,
+			ResourceTypeRole,
+			ResourceTypeClusterRole,
 		),
 	)
 

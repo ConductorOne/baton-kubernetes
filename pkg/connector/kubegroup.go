@@ -27,7 +27,7 @@ type kubeGroupBuilder struct {
 
 // ResourceType returns the resource type for KubeGroup.
 func (k *kubeGroupBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
-	return resourceTypeKubeGroup
+	return ResourceTypeKubeGroup
 }
 
 // List extracts unique groups from RBAC bindings and creates Baton group resources.
@@ -53,7 +53,7 @@ func (k *kubeGroupBuilder) List(ctx context.Context, parentResourceID *v2.Resour
 	}
 
 	// Parse pagination token
-	bag, err := parsePageToken(pToken.Token)
+	bag, err := ParsePageToken(pToken.Token)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("failed to parse page token: %w", err)
 	}
@@ -185,7 +185,7 @@ func (k *kubeGroupBuilder) kubeGroupResource(groupName string) (*v2.Resource, er
 	// Create group resource
 	resource, err := rs.NewGroupResource(
 		groupName,
-		resourceTypeKubeGroup,
+		ResourceTypeKubeGroup,
 		groupName,
 		groupOptions,
 	)
@@ -205,8 +205,8 @@ func (k *kubeGroupBuilder) Entitlements(_ context.Context, resource *v2.Resource
 		entitlement.WithDisplayName(fmt.Sprintf("Impersonate %s", resource.DisplayName)),
 		entitlement.WithDescription(fmt.Sprintf("Grants the ability to impersonate the %s group", resource.DisplayName)),
 		entitlement.WithGrantableTo(
-			resourceTypeRole,
-			resourceTypeClusterRole,
+			ResourceTypeRole,
+			ResourceTypeClusterRole,
 		),
 	)
 

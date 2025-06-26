@@ -28,34 +28,46 @@ const (
 
 // Resource type definitions.
 var (
-	resourceTypeNamespace      = &v2.ResourceType{Id: "namespace", DisplayName: "Namespace"}
-	resourceTypeServiceAccount = &v2.ResourceType{Id: "service_account", DisplayName: "Service Account", Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_USER}}
-	resourceTypeRole           = &v2.ResourceType{Id: "role", DisplayName: "Role", Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_ROLE}}
-	resourceTypeClusterRole    = &v2.ResourceType{Id: "cluster_role", DisplayName: "Cluster Role", Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_ROLE}}
-	resourceTypeSecret         = &v2.ResourceType{Id: "secret", DisplayName: "Secret", Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_SECRET}}
-	resourceTypeConfigMap      = &v2.ResourceType{Id: "configmap", DisplayName: "Config Map"}
-	resourceTypeNode           = &v2.ResourceType{Id: "node", DisplayName: "Node"}
-	resourceTypePod            = &v2.ResourceType{Id: "pod", DisplayName: "Pod"}
-	resourceTypeDeployment     = &v2.ResourceType{Id: "deployment", DisplayName: "Deployment"}
-	resourceTypeStatefulSet    = &v2.ResourceType{Id: "statefulset", DisplayName: "Stateful Set"}
-	resourceTypeDaemonSet      = &v2.ResourceType{Id: "daemonset", DisplayName: "Daemon Set"}
-	resourceTypeKubeUser       = &v2.ResourceType{Id: "kube_user", DisplayName: "Kubernetes User", Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_USER}}
-	resourceTypeKubeGroup      = &v2.ResourceType{Id: "kube_group", DisplayName: "Kubernetes Group", Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_GROUP}}
-	resourceTypeBinding        = &v2.ResourceType{Id: "binding", DisplayName: "Binding", Description: "Internal type for processing RBAC bindings"}
+	ResourceTypeNamespace      = &v2.ResourceType{Id: "namespace", DisplayName: "Namespace"}
+	ResourceTypeServiceAccount = &v2.ResourceType{Id: "service_account", DisplayName: "Service Account", Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_USER}}
+	ResourceTypeRole           = &v2.ResourceType{Id: "role", DisplayName: "Role", Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_ROLE}}
+	ResourceTypeClusterRole    = &v2.ResourceType{Id: "cluster_role", DisplayName: "Cluster Role", Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_ROLE}}
+	ResourceTypeSecret         = &v2.ResourceType{Id: "secret", DisplayName: "Secret", Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_SECRET}}
+	ResourceTypeConfigMap      = &v2.ResourceType{Id: "configmap", DisplayName: "Config Map"}
+	ResourceTypeNode           = &v2.ResourceType{Id: "node", DisplayName: "Node"}
+	ResourceTypePod            = &v2.ResourceType{Id: "pod", DisplayName: "Pod"}
+	ResourceTypeDeployment     = &v2.ResourceType{Id: "deployment", DisplayName: "Deployment"}
+	ResourceTypeStatefulSet    = &v2.ResourceType{Id: "statefulset", DisplayName: "Stateful Set"}
+	ResourceTypeDaemonSet      = &v2.ResourceType{Id: "daemonset", DisplayName: "Daemon Set"}
+	ResourceTypeKubeUser       = &v2.ResourceType{Id: "kube_user", DisplayName: "Kubernetes User", Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_USER}}
+	ResourceTypeKubeGroup      = &v2.ResourceType{Id: "kube_group", DisplayName: "Kubernetes Group", Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_GROUP}}
+	ResourceTypeBinding        = &v2.ResourceType{Id: "binding", DisplayName: "Binding", Description: "Internal type for processing RBAC bindings"}
+	ResourceTypeUser           = &v2.ResourceType{Id: "user", DisplayName: "User", Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_USER}}
+	ResourceTypeGroup          = &v2.ResourceType{Id: "group", DisplayName: "Group", Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_GROUP}}
 )
 
 // Configuration options.
-type connectorOpts struct {
-	SyncPods bool
+type ConnectorOpts struct {
+	SyncResources []string
+	CustomSyncer  map[string]ResourceSyncerBuilder
 }
 
 // ConnectorOption is a function that configures the connector options.
-type ConnectorOption func(*connectorOpts) error
+type ConnectorOption func(*ConnectorOpts) error
+type ResourceSyncerBuilder func(*kubernetes.Interface, *Kubernetes) connectorbuilder.ResourceSyncer
 
-// WithSyncPods configures the connector to sync pods.
-func WithSyncPods(syncPods bool) ConnectorOption {
-	return func(opts *connectorOpts) error {
-		opts.SyncPods = syncPods
+// WithSyncResources configures the connector to sync the specified resources in the list only.
+func WithSyncResources(resources []string) ConnectorOption {
+	return func(opts *ConnectorOpts) error {
+		opts.SyncResources = resources
+		return nil
+	}
+}
+
+// WithCustomSyncers configures the connector to use custom syncer for known resources replacing defaults.
+func WithCustomSyncers(syncers map[string]ResourceSyncerBuilder) ConnectorOption {
+	return func(opts *ConnectorOpts) error {
+		opts.CustomSyncer = syncers
 		return nil
 	}
 }
@@ -64,7 +76,7 @@ func WithSyncPods(syncPods bool) ConnectorOption {
 type Kubernetes struct {
 	client kubernetes.Interface
 	config *rest.Config
-	opts   connectorOpts
+	opts   ConnectorOpts
 
 	// Shared binding caches
 	roleBindingsCache        []rbacv1.RoleBinding
@@ -80,7 +92,7 @@ func New(ctx context.Context, cfg *rest.Config, opts ...ConnectorOption) (*Kuber
 		return nil, fmt.Errorf("kubernetes REST config cannot be nil")
 	}
 
-	options := connectorOpts{}
+	options := ConnectorOpts{}
 
 	// Apply option functions
 	for _, opt := range opts {
@@ -107,20 +119,73 @@ func New(ctx context.Context, cfg *rest.Config, opts ...ConnectorOption) (*Kuber
 
 // ResourceSyncers returns the resource syncers for the Kubernetes connector.
 func (k *Kubernetes) ResourceSyncers(ctx context.Context) []connectorbuilder.ResourceSyncer {
-	syncers := []connectorbuilder.ResourceSyncer{
-		newNamespaceBuilder(k.client),
-		newServiceAccountBuilder(k.client),
-		newRoleBuilder(k.client, k),
-		newClusterRoleBuilder(k.client, k),
-		newSecretBuilder(k.client),
-		newConfigMapBuilder(k.client),
-		newNodeBuilder(k.client),
-		newDeploymentBuilder(k.client),
-		newStatefulSetBuilder(k.client),
-		newDaemonSetBuilder(k.client),
-		newPodBuilder(k.client),
-		newKubeUserBuilder(k.client),
-		newKubeGroupBuilder(k.client),
+	// Map resource type IDs to their builder functions
+	builders := map[string]ResourceSyncerBuilder{
+		ResourceTypeNamespace.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncer {
+			return newNamespaceBuilder(k.client)
+		},
+		ResourceTypeServiceAccount.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncer {
+			return newServiceAccountBuilder(k.client)
+		},
+		ResourceTypeRole.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncer {
+			return newRoleBuilder(k.client, k)
+		},
+		ResourceTypeClusterRole.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncer {
+			return newClusterRoleBuilder(k.client, k)
+		},
+		ResourceTypeSecret.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncer {
+			return newSecretBuilder(k.client)
+		},
+		ResourceTypeConfigMap.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncer {
+			return newConfigMapBuilder(k.client)
+		},
+		ResourceTypeNode.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncer {
+			return newNodeBuilder(k.client)
+		},
+		ResourceTypeDeployment.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncer {
+			return newDeploymentBuilder(k.client)
+		},
+		ResourceTypeStatefulSet.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncer {
+			return newStatefulSetBuilder(k.client)
+		},
+		ResourceTypeDaemonSet.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncer {
+			return newDaemonSetBuilder(k.client)
+		},
+		ResourceTypePod.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncer {
+			return newPodBuilder(k.client)
+		},
+		ResourceTypeKubeUser.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncer {
+			return newKubeUserBuilder(k.client)
+		},
+		ResourceTypeKubeGroup.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncer {
+			return newKubeGroupBuilder(k.client)
+		},
+	}
+
+	var syncers []connectorbuilder.ResourceSyncer
+
+	// Override dafault syncers with custom from opts if exists.
+	if k.opts.CustomSyncer != nil {
+		for key, builder := range k.opts.CustomSyncer {
+			if _, ok := builders[key]; ok {
+				builders[key] = builder
+			}
+		}
+	}
+
+	// If SyncResources is empty, sync everything
+	if len(k.opts.SyncResources) == 0 {
+		for _, builder := range builders {
+			syncers = append(syncers, builder(&k.client, k))
+		}
+		return syncers
+	}
+
+	// Otherwise, only sync the requested resources
+	for _, id := range k.opts.SyncResources {
+		if builder, ok := builders[id]; ok {
+			syncers = append(syncers, builder(&k.client, k))
+		}
 	}
 
 	return syncers

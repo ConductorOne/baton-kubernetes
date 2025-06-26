@@ -21,5 +21,5 @@ func TestNamespaceBuilderResourceType(t *testing.T) {
 	resourceType := builder.ResourceType(context.Background())
 
 	// Verify the result
-	assert.Equal(t, resourceTypeNamespace, resourceType, "Expected ResourceType to return resourceTypeNamespace")
+	assert.Equal(t, ResourceTypeNamespace, resourceType, "Expected ResourceType to return resourceTypeNamespace")
 }

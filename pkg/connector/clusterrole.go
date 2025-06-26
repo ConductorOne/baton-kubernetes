@@ -3,6 +3,8 @@ package connector
 import (
 	"context"
 	"fmt"
+	"sync"
+	"time"
 
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -12,21 +14,27 @@ import (
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
 	"github.com/conductorone/baton-sdk/pkg/types/entitlement"
-	"github.com/conductorone/baton-sdk/pkg/types/grant"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"go.uber.org/zap"
 )
 
+const namespaceCacheTTL = 5 * time.Minute
+const clusterScopedMember = "all:member"
+
 // clusterRoleBuilder syncs Kubernetes ClusterRoles as Baton resources.
 type clusterRoleBuilder struct {
 	client          kubernetes.Interface
 	bindingProvider clusterRoleBindingProvider
+	// Cached namespaces
+	cachedNamespaces []string
+	nsMutex          sync.Mutex
+	nsCacheExpiry    time.Time
 }
 
 // ResourceType returns the resource type for ClusterRole.
 func (c *clusterRoleBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
-	return resourceTypeClusterRole
+	return ResourceTypeClusterRole
 }
 
 // List fetches all ClusterRoles from the Kubernetes API.
@@ -37,7 +45,7 @@ func (c *clusterRoleBuilder) List(ctx context.Context, parentResourceID *v2.Reso
 	var rv []*v2.Resource
 
 	// Parse pagination token
-	bag, err := parsePageToken(pToken.Token)
+	bag, err := ParsePageToken(pToken.Token)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("failed to parse page token: %w", err)
 	}
@@ -68,7 +76,7 @@ func (c *clusterRoleBuilder) List(ctx context.Context, parentResourceID *v2.Reso
 	}
 
 	// Calculate next page token
-	nextPageToken, err := handleKubePagination(&resp.ListMeta, bag)
+	nextPageToken, err := HandleKubePagination(&resp.ListMeta, bag)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("failed to handle pagination: %w", err)
 	}
@@ -89,13 +97,17 @@ func clusterRoleResource(clusterRole *rbacv1.ClusterRole) (*v2.Resource, error) 
 
 	// Add aggregation rule if present
 	if clusterRole.AggregationRule != nil {
-		profile["aggregationRule"] = clusterRole.AggregationRule
+		agRule, err := ParseAggregationRule(clusterRole.AggregationRule)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal aggregation rule: %w", err)
+		}
+		profile["aggregationRule"] = agRule
 	}
 
 	// Create resource as a role - pass the name directly as the raw ID
 	resource, err := rs.NewRoleResource(
 		clusterRole.Name,
-		resourceTypeClusterRole,
+		ResourceTypeClusterRole,
 		clusterRole.Name, // Pass the name directly as the object ID
 		[]rs.RoleTraitOption{rs.WithRoleProfile(profile)},
 	)
@@ -110,45 +122,42 @@ func clusterRoleResource(clusterRole *rbacv1.ClusterRole) (*v2.Resource, error) 
 func (c *clusterRoleBuilder) Entitlements(ctx context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
 	var entitlements []*v2.Entitlement
 
-	// Create the 'member' entitlement for the cluster role
+	// Create the 'all:member' entitlement for the cluster role for cluster level (all namespaces)
 	memberEnt := entitlement.NewAssignmentEntitlement(
 		resource,
-		"member",
+		clusterScopedMember,
 		entitlement.WithDisplayName(fmt.Sprintf("%s Cluster Role Member", resource.DisplayName)),
 		entitlement.WithDescription(fmt.Sprintf("Grants membership to the %s cluster role", resource.DisplayName)),
 		entitlement.WithGrantableTo(
-			resourceTypeKubeUser,
-			resourceTypeKubeGroup,
-			resourceTypeServiceAccount,
+			ResourceTypeKubeUser,
+			ResourceTypeKubeGroup,
+			ResourceTypeServiceAccount,
 		),
 	)
 	entitlements = append(entitlements, memberEnt)
 
-	// Add 'bind' privilege escalation entitlement
-	bindEnt := entitlement.NewPermissionEntitlement(
-		resource,
-		"bind",
-		entitlement.WithDisplayName(fmt.Sprintf("Bind %s", resource.DisplayName)),
-		entitlement.WithDescription(fmt.Sprintf("Grants the ability to bind the %s cluster role to subjects without having the permissions it grants", resource.DisplayName)),
-		entitlement.WithGrantableTo(
-			resourceTypeRole,
-			resourceTypeClusterRole,
-		),
-	)
-	entitlements = append(entitlements, bindEnt)
+	// Each ClusterRole can be granted in a RoleBinding, thus binding it to a namespace.
+	// Create entitlements for each namespace.
+	err := c.cacheNamespaces(ctx)
+	if err != nil {
+		return nil, "", nil, fmt.Errorf("failed to cache namespaces: %w", err)
+	}
 
-	// Add 'escalate' privilege escalation entitlement
-	escalateEnt := entitlement.NewPermissionEntitlement(
-		resource,
-		"escalate",
-		entitlement.WithDisplayName(fmt.Sprintf("Escalate %s", resource.DisplayName)),
-		entitlement.WithDescription(fmt.Sprintf("Grants the ability to escalate the %s cluster role to include permissions that the user doesn't already have", resource.DisplayName)),
-		entitlement.WithGrantableTo(
-			resourceTypeRole,
-			resourceTypeClusterRole,
-		),
-	)
-	entitlements = append(entitlements, escalateEnt)
+	for _, ns := range c.cachedNamespaces {
+		entitlementName := fmt.Sprintf("%s:%s", ns, "member")
+		nsEnt := entitlement.NewAssignmentEntitlement(
+			resource,
+			entitlementName,
+			entitlement.WithDisplayName(fmt.Sprintf("\"%s\" Cluster Role Member in \"%s\" namespace", resource.DisplayName, ns)),
+			entitlement.WithDescription(fmt.Sprintf("Grants membership to the \"%s\" cluster role in namespace \"%s\"", resource.DisplayName, ns)),
+			entitlement.WithGrantableTo(
+				ResourceTypeKubeUser,
+				ResourceTypeKubeGroup,
+				ResourceTypeServiceAccount,
+			),
+		)
+		entitlements = append(entitlements, nsEnt)
+	}
 
 	return entitlements, "", nil, nil
 }
@@ -164,13 +173,6 @@ func (c *clusterRoleBuilder) Grants(ctx context.Context, resource *v2.Resource, 
 	}
 	name := resource.Id.Resource
 
-	// Get the full ClusterRole object
-	l.Debug("fetching cluster role for grants", zap.String("name", name))
-	clusterRole, err := c.client.RbacV1().ClusterRoles().Get(ctx, name, metav1.GetOptions{})
-	if err != nil {
-		return nil, "", nil, fmt.Errorf("failed to get cluster role: %w", err)
-	}
-
 	// Get matching role bindings and cluster role bindings from the binding provider
 	matchingRoleBindings, matchingClusterBindings, err := c.bindingProvider.GetMatchingBindingsForClusterRole(ctx, name)
 	if err != nil {
@@ -183,174 +185,71 @@ func (c *clusterRoleBuilder) Grants(ctx context.Context, resource *v2.Resource, 
 		return nil, "", nil, nil
 	}
 
-	// Define standard verbs for wildcard expansion
-	standardVerbs := []string{"get", "list", "watch", "create", "update", "patch", "delete", "deletecollection"}
-
 	// Process each matching cluster binding
 	for _, binding := range matchingClusterBindings {
 		// Process each subject in the binding
 		for _, subject := range binding.Subjects {
-			// Map the subject to its corresponding Baton principal resource ID
-			principalID, err := mapSubjectToPrincipalID(subject, "")
+			subjectGrant, err := GrantRoleToSubject(subject, resource, clusterScopedMember)
 			if err != nil {
-				l.Error("failed to map subject to principal ID",
-					zap.String("kind", subject.Kind),
-					zap.String("name", subject.Name),
-					zap.Error(err))
+				l.Debug("subject type not supported", zap.String("subject kind", subject.Kind))
 				continue
 			}
-
-			// Process each rule in the cluster role
-			for _, rule := range clusterRole.Rules {
-				// Skip non-resource URLs as they don't map to Baton resources
-				if len(rule.NonResourceURLs) > 0 {
-					l.Debug("skipping non-resource URLs in cluster role rule",
-						zap.Strings("urls", rule.NonResourceURLs))
-					continue
-				}
-
-				// Process each API group and resource combination
-				for _, apiGroup := range rule.APIGroups {
-					for _, res := range rule.Resources {
-						targetResourceType := mapKubeResourceToBatonType(apiGroup, res)
-						if targetResourceType == nil {
-							l.Debug("unmapped resource type",
-								zap.String("apiGroup", apiGroup),
-								zap.String("resource", res))
-							continue
-						}
-
-						// Create target resource ID
-						resourceSpecifier := "*" // Wildcard by default
-						if len(rule.ResourceNames) > 0 {
-							// Log that we're targeting specific instances
-							l.Debug("rule targets specific resource instances",
-								zap.Strings("resourceNames", rule.ResourceNames))
-							// For simplicity, we'll still grant on the type level
-						}
-
-						targetID, err := formatResourceID(targetResourceType, resourceSpecifier)
-						if err != nil {
-							l.Error("failed to create target resource ID",
-								zap.String("apiGroup", apiGroup),
-								zap.String("resource", res),
-								zap.Error(err))
-							continue
-						}
-
-						// Process each verb
-						for _, verb := range rule.Verbs {
-							// If the verb is "*", expand to all standard verbs
-							if verb == "*" {
-								// Create a grant for each standard verb
-								for _, standardVerb := range standardVerbs {
-									g := grant.NewGrant(
-										&v2.Resource{Id: principalID},
-										standardVerb,
-										targetID,
-									)
-									rv = append(rv, g)
-								}
-							} else {
-								// Create a grant for the specific verb
-								g := grant.NewGrant(
-									&v2.Resource{Id: principalID},
-									verb,
-									targetID,
-								)
-								rv = append(rv, g)
-							}
-						}
-					}
-				}
-			}
+			rv = append(rv, subjectGrant)
 		}
 	}
 
 	// Process each matching role binding
 	for _, binding := range matchingRoleBindings {
 		namespace := binding.Namespace
-
 		// Process each subject in the binding
 		for _, subject := range binding.Subjects {
-			// Map the subject to its corresponding Baton principal resource ID
-			principalID, err := mapSubjectToPrincipalID(subject, namespace)
+			entName := fmt.Sprintf("%s:%s", namespace, "member")
+			subjectGrant, err := GrantRoleToSubject(subject, resource, entName)
 			if err != nil {
-				l.Error("failed to map subject to principal ID",
-					zap.String("kind", subject.Kind),
-					zap.String("name", subject.Name),
-					zap.Error(err))
+				l.Debug("subject kind not supported", zap.String("subject kind", subject.Kind))
 				continue
 			}
-
-			// Process each rule in the cluster role
-			for _, rule := range clusterRole.Rules {
-				// Skip non-resource URLs as they don't map to Baton resources
-				if len(rule.NonResourceURLs) > 0 {
-					l.Debug("skipping non-resource URLs in cluster role rule",
-						zap.Strings("urls", rule.NonResourceURLs))
-					continue
-				}
-
-				// Process each API group and resource combination
-				for _, apiGroup := range rule.APIGroups {
-					for _, res := range rule.Resources {
-						targetResourceType := mapKubeResourceToBatonType(apiGroup, res)
-						if targetResourceType == nil {
-							l.Debug("unmapped resource type",
-								zap.String("apiGroup", apiGroup),
-								zap.String("resource", res))
-							continue
-						}
-
-						// Create target resource ID
-						resourceSpecifier := "*" // Wildcard by default
-						if len(rule.ResourceNames) > 0 {
-							// Log that we're targeting specific instances
-							l.Debug("rule targets specific resource instances",
-								zap.Strings("resourceNames", rule.ResourceNames))
-							// For simplicity, we'll still grant on the type level
-						}
-
-						targetID, err := formatResourceID(targetResourceType, resourceSpecifier)
-						if err != nil {
-							l.Error("failed to create target resource ID",
-								zap.String("apiGroup", apiGroup),
-								zap.String("resource", res),
-								zap.Error(err))
-							continue
-						}
-
-						// Process each verb
-						for _, verb := range rule.Verbs {
-							// If the verb is "*", expand to all standard verbs
-							if verb == "*" {
-								// Create a grant for each standard verb
-								for _, standardVerb := range standardVerbs {
-									g := grant.NewGrant(
-										&v2.Resource{Id: principalID},
-										standardVerb,
-										targetID,
-									)
-									rv = append(rv, g)
-								}
-							} else {
-								// Create a grant for the specific verb
-								g := grant.NewGrant(
-									&v2.Resource{Id: principalID},
-									verb,
-									targetID,
-								)
-								rv = append(rv, g)
-							}
-						}
-					}
-				}
-			}
+			rv = append(rv, subjectGrant)
 		}
 	}
 
 	return rv, "", nil, nil
+}
+
+// getNamespaces returns cached namespaces or fetches them if cache is expired or empty.
+func (c *clusterRoleBuilder) cacheNamespaces(ctx context.Context) error {
+	c.nsMutex.Lock()
+	defer c.nsMutex.Unlock()
+
+	now := time.Now()
+	if c.cachedNamespaces != nil && now.Before(c.nsCacheExpiry) {
+		// Cache is valid.
+		return nil
+	}
+	var (
+		names      []string
+		continueAt string
+	)
+	for {
+		opts := metav1.ListOptions{
+			Continue: continueAt,
+		}
+		nsList, err := c.client.CoreV1().Namespaces().List(ctx, opts)
+		if err != nil {
+			return fmt.Errorf("failed to cache namespaces list: %w", err)
+		}
+		for _, ns := range nsList.Items {
+			names = append(names, ns.Name)
+		}
+		if nsList.Continue == "" {
+			break
+		}
+		continueAt = nsList.Continue
+	}
+
+	c.cachedNamespaces = names
+	c.nsCacheExpiry = now.Add(namespaceCacheTTL)
+	return nil
 }
 
 // newClusterRoleBuilder creates a new cluster role builder.

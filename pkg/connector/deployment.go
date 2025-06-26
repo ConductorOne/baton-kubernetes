@@ -24,7 +24,7 @@ type deploymentBuilder struct {
 
 // ResourceType returns the resource type for Deployment.
 func (d *deploymentBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
-	return resourceTypeDeployment
+	return ResourceTypeDeployment
 }
 
 // List fetches all Deployments from the Kubernetes API.
@@ -35,14 +35,14 @@ func (d *deploymentBuilder) List(ctx context.Context, parentResourceID *v2.Resou
 	var rv []*v2.Resource
 
 	// Parse pagination token
-	bag, err := parsePageToken(pToken.Token)
+	bag, err := ParsePageToken(pToken.Token)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("failed to parse page token: %w", err)
 	}
 
 	// Add wildcard resource first, but only on the first page (when page token is empty)
 	if bag.PageToken() == "" {
-		wildcardResource, err := generateWildcardResource(resourceTypeDeployment)
+		wildcardResource, err := generateWildcardResource(ResourceTypeDeployment)
 		if err != nil {
 			l.Error("failed to create wildcard resource for deployments", zap.Error(err))
 		} else {
@@ -77,7 +77,7 @@ func (d *deploymentBuilder) List(ctx context.Context, parentResourceID *v2.Resou
 	}
 
 	// Calculate next page token
-	nextPageToken, err := handleKubePagination(&resp.ListMeta, bag)
+	nextPageToken, err := HandleKubePagination(&resp.ListMeta, bag)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("failed to handle pagination: %w", err)
 	}
@@ -91,7 +91,7 @@ func deploymentResource(deployment *appsv1.Deployment) (*v2.Resource, error) {
 	resourceID := deployment.Namespace + "/" + deployment.Name
 
 	// Get parent namespace resource ID
-	parentID, err := namespaceResourceID(deployment.Namespace)
+	parentID, err := NamespaceResourceID(deployment.Namespace)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create parent resource ID: %w", err)
 	}
@@ -110,7 +110,7 @@ func deploymentResource(deployment *appsv1.Deployment) (*v2.Resource, error) {
 	// Create resource
 	resource, err := rs.NewResource(
 		deployment.Name,
-		resourceTypeDeployment,
+		ResourceTypeDeployment,
 		resourceID,
 		options...,
 	)
@@ -133,8 +133,8 @@ func (d *deploymentBuilder) Entitlements(ctx context.Context, resource *v2.Resou
 			entitlement.WithDisplayName(fmt.Sprintf("%s %s", verb, resource.DisplayName)),
 			entitlement.WithDescription(fmt.Sprintf("Grants %s permission on the %s deployment", verb, resource.DisplayName)),
 			entitlement.WithGrantableTo(
-				resourceTypeRole,
-				resourceTypeClusterRole,
+				ResourceTypeRole,
+				ResourceTypeClusterRole,
 			),
 		)
 		entitlements = append(entitlements, ent)
@@ -153,8 +153,8 @@ func (d *deploymentBuilder) Entitlements(ctx context.Context, resource *v2.Resou
 			entitlement.WithDisplayName(fmt.Sprintf("%s %s", verb, resource.DisplayName)),
 			entitlement.WithDescription(fmt.Sprintf("Grants %s permission on the %s deployment", verb, resource.DisplayName)),
 			entitlement.WithGrantableTo(
-				resourceTypeRole,
-				resourceTypeClusterRole,
+				ResourceTypeRole,
+				ResourceTypeClusterRole,
 			),
 		)
 		entitlements = append(entitlements, ent)
