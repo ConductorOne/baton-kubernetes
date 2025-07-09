@@ -129,7 +129,10 @@ func serviceAccountResource(serviceAccount *corev1.ServiceAccount) (*v2.Resource
 		serviceAccount.Name,
 		ResourceTypeServiceAccount,
 		rawID,
-		[]rs.UserTraitOption{rs.WithUserProfile(profile)},
+		[]rs.UserTraitOption{
+			rs.WithUserProfile(profile),
+			rs.WithAccountType(v2.UserTrait_ACCOUNT_TYPE_SERVICE),
+		},
 		rs.WithParentResourceID(parentID),
 	)
 	if err != nil {

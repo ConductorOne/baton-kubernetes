@@ -11,7 +11,7 @@ import (
 func TestConfigs(t *testing.T) {
 	configurationSchema := field.NewConfiguration(
 		getConfigurationFields(),
-		getFieldRelationships()...,
+		field.WithConstraints(getFieldRelationships()...),
 	)
 
 	testCases := []test.TestCase{
