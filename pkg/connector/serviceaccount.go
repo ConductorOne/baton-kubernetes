@@ -30,7 +30,9 @@ func (s *serviceAccountBuilder) ResourceType(ctx context.Context) *v2.ResourceTy
 // List fetches all ServiceAccounts from the Kubernetes API.
 func (s *serviceAccountBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, pToken *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
 	l := ctxzap.Extract(ctx)
-
+	if parentResourceID == nil {
+		return nil, "", nil, nil
+	}
 	// Initialize empty resource slice
 	var rv []*v2.Resource
 
@@ -56,9 +58,10 @@ func (s *serviceAccountBuilder) List(ctx context.Context, parentResourceID *v2.R
 		Continue: bag.PageToken(),
 	}
 
-	// Fetch service accounts from the Kubernetes API across all namespaces
+	// Fetch service accounts from the Kubernetes API for the parent namespace
 	l.Debug("fetching service accounts", zap.String("continue_token", opts.Continue))
-	resp, err := s.client.CoreV1().ServiceAccounts("").List(ctx, opts)
+	parentNamespace := parentResourceID.Resource
+	resp, err := s.client.CoreV1().ServiceAccounts(parentNamespace).List(ctx, opts)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("failed to list service accounts: %w", err)
 	}

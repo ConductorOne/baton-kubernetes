@@ -37,68 +37,87 @@ jobs:
         with:
           test-results: test.json
 
+  # Test the connector can sync with a real Kubernetes cluster
   test:
     runs-on: ubuntu-latest
-    # Define any services needed for the test suite (or delete this section)
-    # services:
-    #   postgres:
-    #     image: postgres:16
-    #     ports:
-    #       - "5432:5432"
-    #     env:
-    #       POSTGRES_PASSWORD: secretpassword
-    env:
-      BATON_LOG_LEVEL: debug
-      # Add any environment variables needed to run baton-kubernetes
-      # BATON_BASE_URL: 'http://localhost:8080'
-      # BATON_ACCESS_TOKEN: 'secret_token'
-      # The following parameters are passed to grant/revoke commands
-      # Change these to the correct IDs for your test data
-      CONNECTOR_GRANT: 'grant:entitlement:group:1234:member:user:9876'
-      CONNECTOR_ENTITLEMENT: 'entitlement:group:1234:member'
-      CONNECTOR_PRINCIPAL: 'user:9876'
-      CONNECTOR_PRINCIPAL_TYPE: 'user'
     steps:
       - name: Install Go
         uses: actions/setup-go@v5
         with:
           go-version: 1.22.x
+      
       - name: Checkout code
         uses: actions/checkout@v4
-      # Install any dependencies here (or delete this)
-      # - name: Install postgres client
-      #   run: sudo apt install postgresql-client
-      # Run any fixture setup here (or delete this)
-      # - name: Import sql into postgres
-      #   run: psql -h localhost --user postgres -f environment.sql
-      #   env:
-      #     PGPASSWORD: secretpassword
-      - name: Build baton-kubernetes
-        run: go build ./cmd/baton-kubernetes
-      - name: Run baton-kubernetes
-        run: ./baton-kubernetes
-
-      - name: Install baton
-        run: ./scripts/get-baton.sh && mv baton /usr/local/bin
-
-      - name: Check for grant before revoking
-
-        run:
-          baton grants --entitlement="${{ env.CONNECTOR_ENTITLEMENT }}" --output-format=json | jq --exit-status ".grants[].principal.id.resource == \"${{ env.CONNECTOR_PRINCIPAL }}\""
-
-
-      - name: Revoke grants
-        run: ./baton-kubernetes --revoke-grant="${{ env.CONNECTOR_GRANT }}"
-
-      - name: Check grant was revoked
-        run: ./baton-kubernetes && baton grants --entitlement="${{ env.CONNECTOR_ENTITLEMENT }}" --output-format=json | jq --exit-status "if .grants then .grants[]?.principal.id.resource != \"${{ env.CONNECTOR_PRINCIPAL }}\" else . end"
-
-      - name: Grant entitlement
-        # Change the grant arguments to the correct IDs for your test data
-        run: ./baton-kubernetes --grant-entitlement="${{ env.CONNECTOR_ENTITLEMENT }}" --grant-principal="${{ env.CONNECTOR_PRINCIPAL }}" --grant-principal-type="${{ env.CONNECTOR_PRINCIPAL_TYPE }}"
-
-      - name: Check grant was re-granted
-
-        run:
-          baton grants --entitlement="${{ env.CONNECTOR_ENTITLEMENT }}" --output-format=json | jq --exit-status ".grants[].principal.id.resource == \"${{ env.CONNECTOR_PRINCIPAL }}\""
+      
+      - name: Install kind
+        run: |
+          curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64
+          chmod +x ./kind
+          sudo mv ./kind /usr/local/bin/kind
+      
+      - name: Install kubectl
+        run: |
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod +x kubectl
+          sudo mv kubectl /usr/local/bin/kubectl
+      
+      - name: Create kind cluster
+        run: |
+          kind create cluster --name baton-test --config - <<EOF
+          kind: Cluster
+          apiVersion: kind.x-k8s.io/v1alpha4
+          nodes:
+          - role: control-plane
+          - role: worker
+          EOF
+      
+      - name: Wait for cluster to be ready
+        run: |
+          kubectl wait --for=condition=Ready node --all --timeout=300s
+      
+      - name: Create test resources
+        run: |
+          # Create test namespace
+          kubectl create namespace test-namespace
+          
+          # Create test service account
+          kubectl create serviceaccount test-sa -n test-namespace
+          
+          # Create test role
+          kubectl create role test-role --verb=get,list --resource=pods -n test-namespace
+          
+          # Create test role binding
+          kubectl create rolebinding test-rolebinding --role=test-role --serviceaccount=test-namespace:test-sa -n test-namespace
+          
+          # Create test configmap
+          kubectl create configmap test-config --from-literal=key1=value1 --from-literal=key2=value2 -n test-namespace
+          
+          # Create test secret
+          kubectl create secret generic test-secret --from-literal=username=admin --from-literal=password=secret123 -n test-namespace
+          
+          # Create test deployment
+          kubectl create deployment test-deployment --image=nginx:alpine -n test-namespace
+          
+          # Wait for deployment to be ready
+          kubectl wait --for=condition=available deployment/test-deployment -n test-namespace --timeout=300s
+      
+      - name: Build connector
+        run: go build -o baton-kubernetes ./cmd/baton-kubernetes
+      
+      - name: Install baton CLI
+        run: |
+          curl -L https://github.com/conductorone/baton/releases/latest/download/baton-linux-amd64 -o baton
+          chmod +x baton
+          sudo mv baton /usr/local/bin/baton
+      
+      - name: Test connector sync
+        run: |
+          # Test that the connector can sync without errors
+          ./baton-kubernetes
+      
+      - name: Cleanup
+        if: always()
+        run: |
+          kind delete cluster --name baton-test || true
+          rm -f baton-kubernetes
 

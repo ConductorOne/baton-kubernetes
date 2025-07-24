@@ -23,6 +23,10 @@ func ParsePageToken(token string) (*pagination.Bag, error) {
 
 // HandleKubePagination handles Kubernetes pagination and creates a new page token.
 func HandleKubePagination(respMeta *metav1.ListMeta, bag *pagination.Bag) (string, error) {
+	if respMeta == nil || respMeta.Continue == "" {
+		return "", nil
+	}
+
 	if respMeta.Continue != "" {
 		bag.Push(pagination.PageState{
 			Token: respMeta.Continue,
