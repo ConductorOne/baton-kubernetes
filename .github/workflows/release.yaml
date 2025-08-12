@@ -7,7 +7,7 @@ on:
 
 jobs:
   release:
-    uses: ConductorOne/github-workflows/.github/workflows/release.yaml@v2.4.0
+    uses: ConductorOne/github-workflows/.github/workflows/release.yaml@v2
     with:
       tag: ${{ github.ref_name }}
       lambda: false
