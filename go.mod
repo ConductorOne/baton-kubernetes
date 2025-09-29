@@ -1,11 +1,9 @@
 module github.com/conductorone/baton-kubernetes
 
-go 1.24
-
-toolchain go1.24.2
+go 1.25
 
 require (
-	github.com/conductorone/baton-sdk v0.3.31
+	github.com/conductorone/baton-sdk v0.4.5
 	github.com/ennyjfrick/ruleguard-logfatal v0.0.2
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
@@ -24,6 +22,7 @@ require (
 	filippo.io/age v1.2.1 // indirect
 	filippo.io/edwards25519 v1.1.0 // indirect
 	github.com/Azure/go-ansiterm v0.0.0-20250102033503-faa5f7b0171c // indirect
+	github.com/Masterminds/semver/v3 v3.4.0 // indirect
 	github.com/aws/aws-lambda-go v1.48.0 // indirect
 	github.com/aws/aws-sdk-go-v2 v1.36.3 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.6.10 // indirect
