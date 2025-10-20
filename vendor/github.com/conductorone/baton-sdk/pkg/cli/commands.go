@@ -23,8 +23,11 @@ import (
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	v1 "github.com/conductorone/baton-sdk/pb/c1/connector_wrapper/v1"
 	"github.com/conductorone/baton-sdk/pkg/connectorrunner"
+	"github.com/conductorone/baton-sdk/pkg/crypto"
 	"github.com/conductorone/baton-sdk/pkg/field"
 	"github.com/conductorone/baton-sdk/pkg/logging"
+	"github.com/conductorone/baton-sdk/pkg/session"
+	"github.com/conductorone/baton-sdk/pkg/types/sessions"
 	"github.com/conductorone/baton-sdk/pkg/uotel"
 )
 
@@ -33,6 +36,11 @@ const (
 )
 
 type ContrainstSetter func(*cobra.Command, field.Configuration) error
+
+// defaultSessionCacheConstructor creates a default in-memory session cache.
+func defaultSessionCacheConstructor(ctx context.Context, opt ...sessions.SessionStoreConstructorOption) (sessions.SessionStore, error) {
+	return session.NewMemorySessionCache(ctx, opt...)
+}
 
 func MakeMainCommand[T field.Configurable](
 	ctx context.Context,
@@ -90,8 +98,14 @@ func MakeMainCommand[T field.Configurable](
 			}
 		}
 
+		readFromPath := true
+		decodeOpts := field.WithAdditionalDecodeHooks(field.FileUploadDecodeHook(readFromPath))
+		t, err := MakeGenericConfiguration[T](v, decodeOpts)
+		if err != nil {
+			return fmt.Errorf("failed to make configuration: %w", err)
+		}
 		// validate required fields and relationship constraints
-		if err := field.Validate(confschema, v); err != nil {
+		if err := field.Validate(confschema, t); err != nil {
 			return err
 		}
 
@@ -189,7 +203,14 @@ func MakeMainCommand[T field.Configurable](
 						profile,
 					))
 			case v.GetString("invoke-action") != "":
-				invokeActionArgs := v.GetStringMap("invoke-action-args")
+				invokeActionArgsStr := v.GetString("invoke-action-args")
+				invokeActionArgs := map[string]any{}
+				if invokeActionArgsStr != "" {
+					err := json.Unmarshal([]byte(invokeActionArgsStr), &invokeActionArgs)
+					if err != nil {
+						return fmt.Errorf("failed to parse invoke-action-args: %w", err)
+					}
+				}
 				invokeActionArgsStruct, err := structpb.NewStruct(invokeActionArgs)
 				if err != nil {
 					return fmt.Errorf("failed to parse invoke-action-args: %w", err)
@@ -282,9 +303,12 @@ func MakeMainCommand[T field.Configurable](
 			opts = append(opts, connectorrunner.WithExternalResourceEntitlementFilter(externalResourceEntitlementIdFilter))
 		}
 
-		t, err := MakeGenericConfiguration[T](v)
+		opts = append(opts, connectorrunner.WithSkipEntitlementsAndGrants(v.GetBool("skip-entitlements-and-grants")))
+
+		// Create session cache and add to context
+		runCtx, err = WithSessionCache(runCtx, defaultSessionCacheConstructor)
 		if err != nil {
-			return fmt.Errorf("failed to make configuration: %w", err)
+			return fmt.Errorf("failed to create session cache: %w", err)
 		}
 
 		c, err := getconnector(runCtx, t)
@@ -389,14 +413,32 @@ func MakeGRPCServerCommand[T field.Configurable](
 		l := ctxzap.Extract(runCtx)
 		l.Debug("starting grpc server")
 
-		// validate required fields and relationship constraints
-		if err := field.Validate(confschema, v); err != nil {
-			return err
-		}
-		t, err := MakeGenericConfiguration[T](v)
+		readFromPath := true
+		decodeOpts := field.WithAdditionalDecodeHooks(field.FileUploadDecodeHook(readFromPath))
+		t, err := MakeGenericConfiguration[T](v, decodeOpts)
 		if err != nil {
 			return fmt.Errorf("failed to make configuration: %w", err)
 		}
+		// validate required fields and relationship constraints
+		if err := field.Validate(confschema, t); err != nil {
+			return err
+		}
+
+		// Create session cache and add to context
+		runCtx, err = WithSessionCache(runCtx, defaultSessionCacheConstructor)
+		if err != nil {
+			return fmt.Errorf("failed to create session cache: %w", err)
+		}
+
+		clientSecret := v.GetString("client-secret")
+		if clientSecret != "" {
+			secretJwk, err := crypto.ParseClientSecret([]byte(clientSecret), true)
+			if err != nil {
+				return err
+			}
+			runCtx = context.WithValue(runCtx, crypto.ContextClientSecretKey, secretJwk)
+		}
+
 		c, err := getconnector(runCtx, t)
 		if err != nil {
 			return err
@@ -514,13 +556,21 @@ func MakeCapabilitiesCommand[T field.Configurable](
 			return err
 		}
 
-		// validate required fields and relationship constraints
-		if err := field.Validate(confschema, v); err != nil {
-			return err
-		}
-		t, err := MakeGenericConfiguration[T](v)
+		readFromPath := true
+		decodeOpts := field.WithAdditionalDecodeHooks(field.FileUploadDecodeHook(readFromPath))
+		t, err := MakeGenericConfiguration[T](v, decodeOpts)
 		if err != nil {
 			return fmt.Errorf("failed to make configuration: %w", err)
+		}
+		// validate required fields and relationship constraints
+		if err := field.Validate(confschema, t); err != nil {
+			return err
+		}
+
+		// Create session cache and add to context
+		runCtx, err = WithSessionCache(runCtx, defaultSessionCacheConstructor)
+		if err != nil {
+			return fmt.Errorf("failed to create session cache: %w", err)
 		}
 
 		c, err := getconnector(runCtx, t)
