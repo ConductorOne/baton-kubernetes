@@ -124,6 +124,18 @@ func New(ctx context.Context, cfg *rest.Config, opts ...ConnectorOption) (*Kuber
 	if err != nil {
 		return nil, fmt.Errorf("creating HTTP client: %w", err)
 	}
+
+	// Apply WrapTransport from config if present (needed for auth wrappers like token injection)
+	// This wraps the uhttp.Transport with authentication layers while preserving uhttp features
+	// (logging, user-agent, etc.) since the underlying uhttp.Transport remains in the chain
+	if cfg.WrapTransport != nil && httpClient.Transport != nil {
+		wrappedTransport, err := rest.HTTPWrappersForConfig(cfg, httpClient.Transport)
+		if err != nil {
+			return nil, fmt.Errorf("wrapping HTTP transport: %w", err)
+		}
+		httpClient.Transport = wrappedTransport
+	}
+
 	client, err := kubernetes.NewForConfigAndClient(cfg, httpClient)
 	if err != nil {
 		return nil, fmt.Errorf("creating kubernetes client: %w", err)
