@@ -103,8 +103,24 @@ func New(ctx context.Context, cfg *rest.Config, opts ...ConnectorOption) (*Kuber
 		}
 	}
 
+	// Extract TLS config from Kubernetes config to apply to custom HTTP client
+	tlsConfig, err := rest.TLSConfigFor(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("getting TLS config from kubernetes config: %w", err)
+	}
+
+	// Build uhttp options
+	uhttpOpts := []uhttp.Option{
+		uhttp.WithLogger(true, ctxzap.Extract(ctx)),
+	}
+
+	// Apply TLS config if present
+	if tlsConfig != nil {
+		uhttpOpts = append(uhttpOpts, uhttp.WithTLSClientConfig(tlsConfig))
+	}
+
 	// Create kubernetes client
-	httpClient, err := uhttp.NewClient(ctx, uhttp.WithLogger(true, ctxzap.Extract(ctx)))
+	httpClient, err := uhttp.NewClient(ctx, uhttpOpts...)
 	if err != nil {
 		return nil, err
 	}
