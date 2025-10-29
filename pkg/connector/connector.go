@@ -8,6 +8,7 @@ import (
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/connectorbuilder"
+	"github.com/conductorone/baton-sdk/pkg/uhttp"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"go.uber.org/zap"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -103,7 +104,11 @@ func New(ctx context.Context, cfg *rest.Config, opts ...ConnectorOption) (*Kuber
 	}
 
 	// Create kubernetes client
-	client, err := kubernetes.NewForConfig(cfg)
+	httpClient, err := uhttp.NewClient(ctx, uhttp.WithLogger(true, ctxzap.Extract(ctx)))
+	if err != nil {
+		return nil, err
+	}
+	client, err := kubernetes.NewForConfigAndClient(cfg, httpClient)
 	if err != nil {
 		return nil, fmt.Errorf("creating kubernetes client: %w", err)
 	}
