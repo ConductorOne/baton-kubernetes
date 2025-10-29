@@ -122,7 +122,7 @@ func New(ctx context.Context, cfg *rest.Config, opts ...ConnectorOption) (*Kuber
 	// Create kubernetes client
 	httpClient, err := uhttp.NewClient(ctx, uhttpOpts...)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("creating HTTP client: %w", err)
 	}
 	client, err := kubernetes.NewForConfigAndClient(cfg, httpClient)
 	if err != nil {
