@@ -10,12 +10,12 @@ jobs:
   go-lint:
     runs-on: ubuntu-latest
     steps:
-      - name: Install Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: 1.24.x
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
+      - name: Install Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
       - name: Run linters
         uses: golangci/golangci-lint-action@v8
         with:
@@ -24,22 +24,21 @@ jobs:
   go-test:
     strategy:
       matrix:
-        go-version: [1.24.x]
         platform: [ubuntu-latest]
     runs-on: ${{ matrix.platform }}
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
       - name: Install Go
         if: success()
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
-          go-version: ${{ matrix.go-version }}
-      - name: Checkout code
-        uses: actions/checkout@v4
+          go-version-file: go.mod
       - name: go tests
         run: (set -o pipefail && go test -v -covermode=count -json ./... | tee test.json)
       - name: annotate go tests
         if: always()
-        uses: guyarb/golang-test-annotations@v0.5.1
+        uses: guyarb/golang-test-annotations@v0.8.0
         with:
           test-results: test.json
 
@@ -47,26 +46,25 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - name: Install Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: 1.24.x
-      
       - name: Checkout code
-        uses: actions/checkout@v4
-      
+        uses: actions/checkout@v5
+      - name: Install Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
       - name: Install kind
         run: |
           curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64
           chmod +x ./kind
           sudo mv ./kind /usr/local/bin/kind
-      
+
       - name: Install kubectl
         run: |
           curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
           chmod +x kubectl
           sudo mv kubectl /usr/local/bin/kubectl
-      
+
       - name: Create kind cluster
         run: |
           kind create cluster --name baton-test --config - <<EOF
@@ -76,40 +74,40 @@ jobs:
           - role: control-plane
           - role: worker
           EOF
-      
+
       - name: Wait for cluster to be ready
         run: |
           kubectl wait --for=condition=Ready node --all --timeout=300s
-      
+
       - name: Create test resources
         run: |
           # Create test namespace
           kubectl create namespace test-namespace
-          
+
           # Create test service account
           kubectl create serviceaccount test-sa -n test-namespace
-          
+
           # Create test role
           kubectl create role test-role --verb=get,list --resource=pods -n test-namespace
-          
+
           # Create test role binding
           kubectl create rolebinding test-rolebinding --role=test-role --serviceaccount=test-namespace:test-sa -n test-namespace
-          
+
           # Create test configmap
           kubectl create configmap test-config --from-literal=key1=value1 --from-literal=key2=value2 -n test-namespace
-          
+
           # Create test secret
           kubectl create secret generic test-secret --from-literal=username=admin --from-literal=password=secret123 -n test-namespace
-          
+
           # Create test deployment
           kubectl create deployment test-deployment --image=nginx:alpine -n test-namespace
-          
+
           # Wait for deployment to be ready
           kubectl wait --for=condition=available deployment/test-deployment -n test-namespace --timeout=300s
-      
+
       - name: Build connector
         run: go build -o baton-kubernetes ./cmd/baton-kubernetes
-      
+
       - name: Get baton
         uses: ConductorOne/github-workflows/actions/get-baton@v2
 
@@ -117,7 +115,7 @@ jobs:
         run: |
           # Test that the connector can sync without errors
           ./baton-kubernetes
-      
+
       - name: Cleanup
         if: always()
         run: kind delete cluster --name baton-test || true

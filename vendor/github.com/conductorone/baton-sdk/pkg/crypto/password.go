@@ -1,6 +1,7 @@
 package crypto
 
 import (
+	"context"
 	"crypto/rand"
 	"errors"
 	"fmt"
@@ -21,10 +22,15 @@ const (
 var ErrInvalidCredentialOptions = errors.New("unknown credential options")
 var ErrInvalidPasswordLength = errors.New("invalid password length")
 
-func GeneratePassword(credentialOptions *v2.CredentialOptions) (string, error) {
+func GeneratePassword(ctx context.Context, credentialOptions *v2.LocalCredentialOptions) (string, error) {
 	randomPassword := credentialOptions.GetRandomPassword()
 	if randomPassword != nil {
 		return GenerateRandomPassword(randomPassword)
+	}
+
+	plaintextPassword := credentialOptions.GetPlaintextPassword()
+	if plaintextPassword != nil {
+		return plaintextPassword.GetPlaintextPassword(), nil
 	}
 
 	return "", ErrInvalidCredentialOptions
@@ -54,19 +60,19 @@ func addCharacterToPassword(password *strings.Builder, set string) error {
 	return nil
 }
 
-func GenerateRandomPassword(randomPassword *v2.CredentialOptions_RandomPassword) (string, error) {
+func GenerateRandomPassword(randomPassword *v2.LocalCredentialOptions_RandomPassword) (string, error) {
 	passwordLength := randomPassword.GetLength()
 	if passwordLength < 8 {
 		return "", ErrInvalidPasswordLength
 	}
 	var password strings.Builder
 
-	constraints := randomPassword.Constraints
+	constraints := randomPassword.GetConstraints()
 	if len(constraints) > 0 {
 		// apply constraints
 		for _, constraint := range constraints {
-			for i := int64(0); i < int64(constraint.MinCount); i++ {
-				err := addCharacterToPassword(&password, constraint.CharSet)
+			for i := int64(0); i < int64(constraint.GetMinCount()); i++ {
+				err := addCharacterToPassword(&password, constraint.GetCharSet())
 				if err != nil {
 					return "", err
 				}

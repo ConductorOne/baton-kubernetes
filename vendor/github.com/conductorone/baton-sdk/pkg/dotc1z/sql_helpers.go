@@ -2,6 +2,7 @@ package dotc1z
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/conductorone/baton-sdk/pkg/annotations"
+	"github.com/conductorone/baton-sdk/pkg/connectorstore"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 )
@@ -26,6 +28,7 @@ var allTableDescriptors = []tableDescriptor{
 	grants,
 	syncRuns,
 	assets,
+	sessionStore,
 }
 
 type tableDescriptor interface {
@@ -143,32 +146,32 @@ func (c *C1File) listConnectorObjects(ctx context.Context, tableName string, req
 
 	if resourceIdReq, ok := req.(hasResourceIdListRequest); ok {
 		r := resourceIdReq.GetResourceId()
-		if r != nil && r.Resource != "" {
-			q = q.Where(goqu.C("resource_id").Eq(r.Resource))
-			q = q.Where(goqu.C("resource_type_id").Eq(r.ResourceType))
+		if r != nil && r.GetResource() != "" {
+			q = q.Where(goqu.C("resource_id").Eq(r.GetResource()))
+			q = q.Where(goqu.C("resource_type_id").Eq(r.GetResourceType()))
 		}
 	}
 
 	if resourceReq, ok := req.(hasResourceListRequest); ok {
 		r := resourceReq.GetResource()
 		if r != nil {
-			q = q.Where(goqu.C("resource_id").Eq(r.Id.Resource))
-			q = q.Where(goqu.C("resource_type_id").Eq(r.Id.ResourceType))
+			q = q.Where(goqu.C("resource_id").Eq(r.GetId().GetResource()))
+			q = q.Where(goqu.C("resource_type_id").Eq(r.GetId().GetResourceType()))
 		}
 	}
 
 	if entitlementReq, ok := req.(hasEntitlementListRequest); ok {
 		e := entitlementReq.GetEntitlement()
 		if e != nil {
-			q = q.Where(goqu.C("entitlement_id").Eq(e.Id))
+			q = q.Where(goqu.C("entitlement_id").Eq(e.GetId()))
 		}
 	}
 
 	if principalIdReq, ok := req.(hasPrincipalIdListRequest); ok {
 		p := principalIdReq.GetPrincipalId()
 		if p != nil {
-			q = q.Where(goqu.C("principal_resource_id").Eq(p.Resource))
-			q = q.Where(goqu.C("principal_resource_type_id").Eq(p.ResourceType))
+			q = q.Where(goqu.C("principal_resource_id").Eq(p.GetResource()))
+			q = q.Where(goqu.C("principal_resource_type_id").Eq(p.GetResourceType()))
 		}
 	}
 
@@ -179,13 +182,13 @@ func (c *C1File) listConnectorObjects(ctx context.Context, tableName string, req
 	default:
 		var latestSyncRun *syncRun
 		var err error
-		latestSyncRun, err = c.getFinishedSync(ctx, 0, SyncTypeFull)
+		latestSyncRun, err = c.getFinishedSync(ctx, 0, connectorstore.SyncTypeFull)
 		if err != nil {
 			return nil, "", err
 		}
 
 		if latestSyncRun == nil {
-			latestSyncRun, err = c.getLatestUnfinishedSync(ctx)
+			latestSyncRun, err = c.getLatestUnfinishedSync(ctx, connectorstore.SyncTypeAny)
 			if err != nil {
 				return nil, "", err
 			}
@@ -253,6 +256,9 @@ func (c *C1File) listConnectorObjects(ctx context.Context, tableName string, req
 		lastRow = rowId
 		ret = append(ret, data)
 	}
+	if rows.Err() != nil {
+		return nil, "", rows.Err()
+	}
 
 	nextPageToken := ""
 	if count > pageSize {
@@ -314,6 +320,13 @@ func executeChunkedInsert(
 		chunks++
 	}
 
+	tx, err := c.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+
+	var txError error
+
 	for i := 0; i < chunks; i++ {
 		start := i * chunkSize
 		end := (i + 1) * chunkSize
@@ -323,28 +336,39 @@ func executeChunkedInsert(
 		chunkedRows := rows[start:end]
 
 		// Create the base insert dataset
-		insertDs := c.db.Insert(tableName)
+		insertDs := tx.Insert(tableName)
 
 		// Apply the custom query building function
-		insertDs, err := buildQueryFn(insertDs, chunkedRows)
+		insertDs, err = buildQueryFn(insertDs, chunkedRows)
 		if err != nil {
-			return err
+			txError = err
+			break
 		}
 
 		// Generate the SQL
 		query, args, err := insertDs.ToSQL()
 		if err != nil {
-			return err
+			txError = err
+			break
 		}
 
 		// Execute the query
-		_, err = c.db.Exec(query, args...)
+		_, err = tx.ExecContext(ctx, query, args...)
 		if err != nil {
-			return err
+			txError = err
+			break
 		}
 	}
 
-	return nil
+	if txError != nil {
+		if rollbackErr := tx.Rollback(); rollbackErr != nil {
+			return errors.Join(rollbackErr, txError)
+		}
+
+		return fmt.Errorf("error executing chunked insert: %w", txError)
+	}
+
+	return tx.Commit()
 }
 
 func bulkPutConnectorObject[T proto.Message](
@@ -434,8 +458,8 @@ func (c *C1File) getResourceObject(ctx context.Context, resourceID *v2.ResourceI
 
 	q := c.db.From(resources.Name()).Prepared(true)
 	q = q.Select("data")
-	q = q.Where(goqu.C("resource_type_id").Eq(resourceID.ResourceType))
-	q = q.Where(goqu.C("external_id").Eq(fmt.Sprintf("%s:%s", resourceID.ResourceType, resourceID.Resource)))
+	q = q.Where(goqu.C("resource_type_id").Eq(resourceID.GetResourceType()))
+	q = q.Where(goqu.C("external_id").Eq(fmt.Sprintf("%s:%s", resourceID.GetResourceType(), resourceID.GetResource())))
 
 	switch {
 	case syncID != "":
@@ -447,13 +471,13 @@ func (c *C1File) getResourceObject(ctx context.Context, resourceID *v2.ResourceI
 	default:
 		var latestSyncRun *syncRun
 		var err error
-		latestSyncRun, err = c.getFinishedSync(ctx, 0, SyncTypeFull)
+		latestSyncRun, err = c.getFinishedSync(ctx, 0, connectorstore.SyncTypeFull)
 		if err != nil {
 			return err
 		}
 
 		if latestSyncRun == nil {
-			latestSyncRun, err = c.getLatestUnfinishedSync(ctx)
+			latestSyncRun, err = c.getLatestUnfinishedSync(ctx, connectorstore.SyncTypeAny)
 			if err != nil {
 				return err
 			}
@@ -507,13 +531,13 @@ func (c *C1File) getConnectorObject(ctx context.Context, tableName string, id st
 	default:
 		var latestSyncRun *syncRun
 		var err error
-		latestSyncRun, err = c.getFinishedSync(ctx, 0, SyncTypeAny)
+		latestSyncRun, err = c.getFinishedSync(ctx, 0, connectorstore.SyncTypeAny)
 		if err != nil {
 			return fmt.Errorf("error getting finished sync: %w", err)
 		}
 
 		if latestSyncRun == nil {
-			latestSyncRun, err = c.getLatestUnfinishedSync(ctx)
+			latestSyncRun, err = c.getLatestUnfinishedSync(ctx, connectorstore.SyncTypeAny)
 			if err != nil {
 				return fmt.Errorf("error getting latest unfinished sync: %w", err)
 			}
