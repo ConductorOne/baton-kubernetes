@@ -8,6 +8,7 @@ import (
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/connectorbuilder"
+	"github.com/conductorone/baton-sdk/pkg/uhttp"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"go.uber.org/zap"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -102,8 +103,40 @@ func New(ctx context.Context, cfg *rest.Config, opts ...ConnectorOption) (*Kuber
 		}
 	}
 
+	// Extract TLS config from Kubernetes config to apply to custom HTTP client
+	tlsConfig, err := rest.TLSConfigFor(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("getting TLS config from kubernetes config: %w", err)
+	}
+
+	// Build uhttp options
+	uhttpOpts := []uhttp.Option{
+		uhttp.WithLogger(true, ctxzap.Extract(ctx)),
+	}
+
+	// Apply TLS config if present
+	if tlsConfig != nil {
+		uhttpOpts = append(uhttpOpts, uhttp.WithTLSClientConfig(tlsConfig))
+	}
+
 	// Create kubernetes client
-	client, err := kubernetes.NewForConfig(cfg)
+	httpClient, err := uhttp.NewClient(ctx, uhttpOpts...)
+	if err != nil {
+		return nil, fmt.Errorf("creating HTTP client: %w", err)
+	}
+
+	// Apply authentication and transport wrappers from config (bearer token, basic auth, client certs, impersonation, etc.)
+	// This wraps the uhttp.Transport with authentication layers while preserving uhttp features
+	// (logging, user-agent, etc.) since the underlying uhttp.Transport remains in the chain
+	if httpClient.Transport != nil {
+		wrappedTransport, err := rest.HTTPWrappersForConfig(cfg, httpClient.Transport)
+		if err != nil {
+			return nil, fmt.Errorf("wrapping HTTP transport: %w", err)
+		}
+		httpClient.Transport = wrappedTransport
+	}
+
+	client, err := kubernetes.NewForConfigAndClient(cfg, httpClient)
 	if err != nil {
 		return nil, fmt.Errorf("creating kubernetes client: %w", err)
 	}
