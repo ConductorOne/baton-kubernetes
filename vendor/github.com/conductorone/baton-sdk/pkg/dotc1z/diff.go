@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/conductorone/baton-sdk/pkg/connectorstore"
 	"github.com/doug-martin/goqu/v9"
 	"github.com/segmentio/ksuid"
 )
@@ -30,7 +31,7 @@ func (c *C1File) GenerateSyncDiff(ctx context.Context, baseSyncID string, applie
 	// Generate a new unique ID for the diff sync
 	diffSyncID := ksuid.New().String()
 
-	if err := c.insertSyncRun(ctx, diffSyncID, SyncTypePartial, baseSyncID); err != nil {
+	if err := c.insertSyncRun(ctx, diffSyncID, connectorstore.SyncTypePartial, baseSyncID); err != nil {
 		return "", err
 	}
 
@@ -42,6 +43,9 @@ func (c *C1File) GenerateSyncDiff(ctx context.Context, baseSyncID string, applie
 		q, args, err := c.diffTableQuery(t, baseSyncID, appliedSyncID, diffSyncID)
 		if err != nil {
 			return "", err
+		}
+		if q == "" {
+			continue
 		}
 		_, err = c.db.ExecContext(ctx, q, args...)
 		if err != nil {
@@ -69,6 +73,9 @@ func (c *C1File) diffTableQuery(table tableDescriptor, baseSyncID, appliedSyncID
 	tableName := table.Name()
 	// Add table-specific columns
 	switch {
+	case strings.Contains(tableName, sessionStoreTableName):
+		// caching is not relevant to diffs.
+		return "", nil, nil
 	case strings.Contains(tableName, resourcesTableName):
 		columns = append(columns, "resource_type_id", "parent_resource_type_id", "parent_resource_id")
 	case strings.Contains(tableName, resourceTypesTableName):
