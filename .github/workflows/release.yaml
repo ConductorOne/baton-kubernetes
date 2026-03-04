@@ -1,3 +1,4 @@
+# This file is managed by baton-admin. Do not edit directly.
 name: Release
 
 on:
@@ -7,10 +8,9 @@ on:
 
 jobs:
   release:
-    uses: ConductorOne/github-workflows/.github/workflows/release.yaml@v3
+    uses: ConductorOne/github-workflows/.github/workflows/release.yaml@v4
     with:
       tag: ${{ github.ref_name }}
-      lambda: false
     secrets:
       RELENG_GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
       APPLE_SIGNING_KEY_P12: ${{ secrets.APPLE_SIGNING_KEY_P12 }}
@@ -18,3 +18,4 @@ jobs:
       AC_PASSWORD: ${{ secrets.AC_PASSWORD }}
       AC_PROVIDER: ${{ secrets.AC_PROVIDER }}
       DATADOG_API_KEY: ${{ secrets.DATADOG_API_KEY }}
+      GORELEASER_PRO_KEY: ${{ secrets.GORELEASER_PRO_KEY }}
