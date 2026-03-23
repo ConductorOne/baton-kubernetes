@@ -11,38 +11,7 @@
       },
       "capabilities": [
         "CAPABILITY_SYNC"
-      ],
-      "permissions": {}
-    },
-    {
-      "resourceType": {
-        "id": "configmap",
-        "displayName": "Config Map"
-      },
-      "capabilities": [
-        "CAPABILITY_SYNC"
-      ],
-      "permissions": {}
-    },
-    {
-      "resourceType": {
-        "id": "daemonset",
-        "displayName": "Daemon Set"
-      },
-      "capabilities": [
-        "CAPABILITY_SYNC"
-      ],
-      "permissions": {}
-    },
-    {
-      "resourceType": {
-        "id": "deployment",
-        "displayName": "Deployment"
-      },
-      "capabilities": [
-        "CAPABILITY_SYNC"
-      ],
-      "permissions": {}
+      ]
     },
     {
       "resourceType": {
@@ -54,8 +23,7 @@
       },
       "capabilities": [
         "CAPABILITY_SYNC"
-      ],
-      "permissions": {}
+      ]
     },
     {
       "resourceType": {
@@ -67,8 +35,7 @@
       },
       "capabilities": [
         "CAPABILITY_SYNC"
-      ],
-      "permissions": {}
+      ]
     },
     {
       "resourceType": {
@@ -77,28 +44,7 @@
       },
       "capabilities": [
         "CAPABILITY_SYNC"
-      ],
-      "permissions": {}
-    },
-    {
-      "resourceType": {
-        "id": "node",
-        "displayName": "Node"
-      },
-      "capabilities": [
-        "CAPABILITY_SYNC"
-      ],
-      "permissions": {}
-    },
-    {
-      "resourceType": {
-        "id": "pod",
-        "displayName": "Pod"
-      },
-      "capabilities": [
-        "CAPABILITY_SYNC"
-      ],
-      "permissions": {}
+      ]
     },
     {
       "resourceType": {
@@ -110,21 +56,7 @@
       },
       "capabilities": [
         "CAPABILITY_SYNC"
-      ],
-      "permissions": {}
-    },
-    {
-      "resourceType": {
-        "id": "secret",
-        "displayName": "Secret",
-        "traits": [
-          "TRAIT_SECRET"
-        ]
-      },
-      "capabilities": [
-        "CAPABILITY_SYNC"
-      ],
-      "permissions": {}
+      ]
     },
     {
       "resourceType": {
@@ -136,18 +68,7 @@
       },
       "capabilities": [
         "CAPABILITY_SYNC"
-      ],
-      "permissions": {}
-    },
-    {
-      "resourceType": {
-        "id": "statefulset",
-        "displayName": "Stateful Set"
-      },
-      "capabilities": [
-        "CAPABILITY_SYNC"
-      ],
-      "permissions": {}
+      ]
     }
   ],
   "connectorCapabilities": [

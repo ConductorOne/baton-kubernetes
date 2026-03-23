@@ -61,7 +61,34 @@ func getConnector(ctx context.Context, v *viper.Viper) (types.ConnectorServer, e
 		return nil, fmt.Errorf("failed to create Kubernetes REST config: unexpectedly got nil config")
 	}
 
-	cb, err := connector.New(ctx, restConfig)
+	// Build the list of resource types to sync. Core RBAC resources are always
+	// included. Workload/config resources are opt-in via flags because they
+	// expose verb entitlements that never produce grants, resulting in noisy
+	// partial resources in ConductorOne.
+	syncResources := []string{
+		"namespace",
+		"service_account",
+		"role",
+		"cluster_role",
+		"kube_user",
+		"kube_group",
+	}
+	optionalResources := map[string]string{
+		flagSyncConfigMaps:   "configmap",
+		flagSyncSecrets:      "secret",
+		flagSyncPods:         "pod",
+		flagSyncNodes:        "node",
+		flagSyncDeployments:  "deployment",
+		flagSyncStatefulSets: "statefulset",
+		flagSyncDaemonSets:   "daemonset",
+	}
+	for flag, resourceID := range optionalResources {
+		if v.GetBool(flag) {
+			syncResources = append(syncResources, resourceID)
+		}
+	}
+
+	cb, err := connector.New(ctx, restConfig, connector.WithSyncResources(syncResources))
 	if err != nil {
 		l.Error("error creating connector", zap.Error(err))
 		return nil, err

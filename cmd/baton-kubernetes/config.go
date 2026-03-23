@@ -15,6 +15,15 @@ import (
 // https://github.com/kubernetes/cli-runtime/blob/v0.32.3/pkg/genericclioptions/config_flags.go#L46
 
 const (
+	// Partial resource sync flags — off by default.
+	flagSyncConfigMaps   = "sync-config-maps"
+	flagSyncSecrets      = "sync-secrets"
+	flagSyncPods         = "sync-pods"
+	flagSyncNodes        = "sync-nodes"
+	flagSyncDeployments  = "sync-deployments"
+	flagSyncStatefulSets = "sync-stateful-sets"
+	flagSyncDaemonSets   = "sync-daemon-sets"
+
 	// From k8s.io/cli-runtime/pkg/genericclioptions/config_flags.go.
 	flagClusterName        = "cluster"
 	flagAuthInfoName       = "user"
@@ -39,37 +48,142 @@ const (
 )
 
 var (
-	kubeconfigField  = field.StringField(flagKubeconfig, field.WithDescription("Path to the kubeconfig file to use for CLI requests."))
-	cacheDirField    = field.StringField(flagCacheDir, field.WithDescription("Default cache directory"))
-	certFileField    = field.StringField(flagCertFile, field.WithDescription("Path to a client certificate file for TLS"), field.WithRequired(false))
-	keyFileField     = field.StringField(flagKeyFile, field.WithDescription("Path to a client key file for TLS"), field.WithRequired(false))
-	bearerTokenField = field.StringField(flagBearerToken, field.WithDescription("Bearer token for authentication to the API server"), field.WithRequired(false), field.WithIsSecret(true))
-	impersonateField = field.StringField(flagImpersonate,
-		field.WithDescription("Username to impersonate for the operation. User could be a regular user or a service account in a namespace."), field.WithRequired(false))
-	impersonateUIDField = field.StringField(flagImpersonateUID,
-		field.WithDescription("UID to impersonate for the operation."), field.WithRequired(false))
+	kubeconfigField = field.StringField(
+		flagKubeconfig,
+		field.WithDescription("Path to the kubeconfig file to use for CLI requests."),
+	)
+	cacheDirField = field.StringField(
+		flagCacheDir,
+		field.WithDescription("Default cache directory"),
+	)
+	certFileField = field.StringField(
+		flagCertFile,
+		field.WithDescription("Path to a client certificate file for TLS"),
+		field.WithRequired(false),
+	)
+	keyFileField = field.StringField(
+		flagKeyFile,
+		field.WithDescription("Path to a client key file for TLS"),
+		field.WithRequired(false),
+	)
+	bearerTokenField = field.StringField(
+		flagBearerToken,
+		field.WithDescription("Bearer token for authentication to the API server"),
+		field.WithRequired(false),
+		field.WithIsSecret(true),
+	)
+	impersonateField = field.StringField(
+		flagImpersonate,
+		field.WithDescription("Username to impersonate for the operation. User could be a regular user or a service account in a namespace."),
+		field.WithRequired(false),
+	)
+	impersonateUIDField = field.StringField(
+		flagImpersonateUID,
+		field.WithDescription("UID to impersonate for the operation."),
+		field.WithRequired(false),
+	)
 	impersonateGroupField = field.StringSliceField(flagImpersonateGroup,
-		field.WithDescription("Group to impersonate for the operation, this flag can be repeated to specify multiple groups."), field.WithRequired(false))
-	usernameField      = field.StringField(flagUsername, field.WithDescription("Username for basic authentication to the API server"), field.WithRequired(false))
-	passwordField      = field.StringField(flagPassword, field.WithDescription("Password for basic authentication to the API server"), field.WithRequired(false), field.WithIsSecret(true))
-	clusterNameField   = field.StringField(flagClusterName, field.WithDescription("The name of the kubeconfig cluster to use"), field.WithRequired(false))
-	authInfoNameField  = field.StringField(flagAuthInfoName, field.WithDescription("The name of the kubeconfig user to use"), field.WithRequired(false))
-	namespaceField     = field.StringField(flagNamespace, field.WithDescription("If present, the namespace scope for this CLI request"), field.WithRequired(false))
-	contextField       = field.StringField(flagContext, field.WithDescription("The name of the kubeconfig context to use"), field.WithRequired(false))
-	apiServerField     = field.StringField(flagAPIServer, field.WithDescription("The address and port of the Kubernetes API server"), field.WithRequired(false))
-	tlsServerNameField = field.StringField(flagTLSServerName,
-		field.WithDescription("Server name to use for server certificate validation. If it is not provided, the hostname used to contact the server is used"), field.WithRequired(false))
-	insecureField = field.BoolField(flagInsecure,
-		field.WithDescription("If true, the server's certificate will not be checked for validity. This will make your HTTPS connections insecure"), field.WithDefaultValue(false))
+		field.WithDescription("Group to impersonate for the operation, this flag can be repeated to specify multiple groups."),
+		field.WithRequired(false),
+	)
+	usernameField = field.StringField(
+		flagUsername,
+		field.WithDescription("Username for basic authentication to the API server"),
+		field.WithRequired(false),
+	)
+	passwordField = field.StringField(
+		flagPassword,
+		field.WithDescription("Password for basic authentication to the API server"),
+		field.WithRequired(false),
+		field.WithIsSecret(true),
+	)
+	clusterNameField = field.StringField(
+		flagClusterName,
+		field.WithDescription("The name of the kubeconfig cluster to use"),
+		field.WithRequired(false),
+	)
+	authInfoNameField = field.StringField(
+		flagAuthInfoName,
+		field.WithDescription("The name of the kubeconfig user to use"),
+		field.WithRequired(false),
+	)
+	namespaceField = field.StringField(
+		flagNamespace,
+		field.WithDescription("If present, the namespace scope for this CLI request"),
+		field.WithRequired(false),
+	)
+	contextField = field.StringField(
+		flagContext,
+		field.WithDescription("The name of the kubeconfig context to use"),
+		field.WithRequired(false),
+	)
+	apiServerField = field.StringField(
+		flagAPIServer,
+		field.WithDescription("The address and port of the Kubernetes API server"),
+		field.WithRequired(false),
+	)
+	tlsServerNameField = field.StringField(
+		flagTLSServerName,
+		field.WithDescription("Server name to use for server certificate validation. If it is not provided, the hostname used to contact the server is used"),
+		field.WithRequired(false),
+	)
+	insecureField = field.BoolField(
+		flagInsecure,
+		field.WithDescription("If true, the server's certificate will not be checked for validity. This will make your HTTPS connections insecure"),
+		field.WithDefaultValue(false),
+	)
 	caFileField = field.StringField(flagCAFile,
-		field.WithDescription("Path to a cert file for the certificate authority"), field.WithRequired(false))
+		field.WithDescription("Path to a cert file for the certificate authority"),
+		field.WithRequired(false),
+	)
 	timeoutField = field.StringField(flagTimeout,
 		field.WithDescription(
 			"The length of time to wait before giving up on a single server request."+
 				" Non-zero values should contain a corresponding time unit (e.g. 1s, 2m, 3h)."+
 				" A value of zero means don't timeout requests."),
-		field.WithDefaultValue("0"))
-	disableCompressionField = field.BoolField(flagDisableCompression, field.WithDescription("If true, opt-out of response compression for all requests to the server"), field.WithDefaultValue(false))
+		field.WithDefaultValue("0"),
+	)
+	disableCompressionField = field.BoolField(
+		flagDisableCompression,
+		field.WithDescription("If true, opt-out of response compression for all requests to the server"),
+		field.WithDefaultValue(false),
+	)
+
+	syncConfigMapsField = field.BoolField(
+		flagSyncConfigMaps,
+		field.WithDescription("Sync ConfigMap resources (disabled by default)"),
+		field.WithDefaultValue(false),
+	)
+	syncSecretsField = field.BoolField(
+		flagSyncSecrets,
+		field.WithDescription("Sync Secret resources (disabled by default)"),
+		field.WithDefaultValue(false),
+	)
+	syncPodsField = field.BoolField(
+		flagSyncPods,
+		field.WithDescription("Sync Pod resources (disabled by default)"),
+		field.WithDefaultValue(false),
+	)
+	syncNodesField = field.BoolField(
+		flagSyncNodes,
+		field.WithDescription("Sync Node resources (disabled by default)"),
+		field.WithDefaultValue(false),
+	)
+	syncDeploymentsField = field.BoolField(
+		flagSyncDeployments,
+		field.WithDescription("Sync Deployment resources (disabled by default)"),
+		field.WithDefaultValue(false),
+	)
+	syncStatefulSetsField = field.BoolField(
+		flagSyncStatefulSets,
+		field.WithDescription("Sync StatefulSet resources (disabled by default)"),
+		field.WithDefaultValue(false),
+	)
+	syncDaemonSetsField   = field.BoolField(
+		flagSyncDaemonSets,
+		field.WithDescription("Sync DaemonSet resources (disabled by default)"),
+		field.WithDefaultValue(false),
+	)
 )
 
 func getConfigurationFields() []field.SchemaField {
@@ -94,6 +208,13 @@ func getConfigurationFields() []field.SchemaField {
 		caFileField,
 		timeoutField,
 		disableCompressionField,
+		syncConfigMapsField,
+		syncSecretsField,
+		syncPodsField,
+		syncNodesField,
+		syncDeploymentsField,
+		syncStatefulSetsField,
+		syncDaemonSetsField,
 	}
 }
 
