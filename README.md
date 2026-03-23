@@ -36,8 +36,42 @@ baton resources
 
 # Data Model
 
-`baton-kubernetes` will pull down information about the following resources:
-- Users
+`baton-kubernetes` syncs identity and access data from the Kubernetes API. The following resource types are supported:
+
+| Resource Type | Description | Entitlements |
+| --- | --- | --- |
+| Namespace | Kubernetes namespace | — |
+| Role | Namespaced RBAC role | `member` — granted to users, groups, and service accounts via RoleBindings |
+| ClusterRole | Cluster-scoped RBAC role | `all:member` (cluster-wide) and `<namespace>:member` (namespace-scoped via RoleBindings) |
+| ServiceAccount | Kubernetes service account | — |
+| Kubernetes User (`kube_user`) | User identity referenced in RBAC bindings | — |
+| Kubernetes Group (`kube_group`) | Group identity referenced in RBAC bindings | `member` — see limitations below |
+| Node | Cluster node | — |
+| Pod | Running pod | — |
+| Deployment | Deployment resource | — |
+| StatefulSet | StatefulSet resource | — |
+| DaemonSet | DaemonSet resource | — |
+| ConfigMap | ConfigMap resource | — |
+| Secret | Secret resource | — |
+
+## Group Membership
+
+Kubernetes group membership is not a native API object. Groups exist only as claims in authentication credentials and are never persisted in the cluster. The connector discovers group membership by one method only:
+
+**x509 client certificates in kubeconfig Secrets** — when a Secret contains a kubeconfig with embedded client certificate data, the connector parses the certificate's `O=` (Organization) fields as group names and the `CN=` (Common Name) field as the username, then emits a `kube_group:<group>:member → kube_user:<cn>` grant.
+
+### Limitations
+
+The following authentication methods are **not supported** for group membership discovery. Users authenticating via these methods will appear in RBAC bindings but their group memberships will not be visible:
+
+- **OIDC / OAuth2** — group claims live in the ID token, which the cluster never stores
+- **Webhook authenticators** — group assignment happens at auth time outside the cluster
+- **Bootstrap tokens** — no user or group identity is stored in the cluster
+- **In-cluster service account tokens** — group is always `system:serviceaccounts` and `system:serviceaccounts:<namespace>`, inferred from the token's namespace, not from a parseable credential
+
+### What this means for access auditing
+
+RBAC bindings to groups are fully visible. If `ClusterRole:admin` is bound to group `developers`, that grant is synced. However, **the list of users in `developers` is only complete if those users authenticate via x509 client certificates stored as kubeconfig Secrets in the cluster**. Users authenticating via OIDC or webhook will appear as grant targets on Roles and ClusterRoles (if they have direct bindings) but not as members of their groups.
 
 # Contributing, Support and Issues
 
