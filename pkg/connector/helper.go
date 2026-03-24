@@ -153,6 +153,10 @@ func GrantRoleToSubject(subject rbacv1.Subject, resource *v2.Resource, entName s
 				resource,
 				entName,
 				groupResource,
+				grant.WithAnnotation(&v2.GrantExpandable{
+					EntitlementIds:  []string{fmt.Sprintf("kube_group:%s:member", subject.Name)},
+					ResourceTypeIds: []string{ResourceTypeKubeUser.Id},
+				}),
 			)
 			return g, nil
 		}

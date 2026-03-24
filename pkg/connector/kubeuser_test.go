@@ -104,7 +104,7 @@ func makeKubeconfigSecretWithEmptyCN(t *testing.T, name, namespace string, orgs 
 
 // TestKubeUserBuilderPhase3EmptyCNFallback verifies that a cert with an empty CN:
 // - does NOT produce a user resource (empty CN excluded from Usernames)
-// - DOES populate GroupMembers using the kubeconfig auth-info key as principalName
+// - DOES populate GroupMembers using the kubeconfig auth-info key as principalName.
 func TestKubeUserBuilderPhase3EmptyCNFallback(t *testing.T) {
 	secret := makeKubeconfigSecretWithEmptyCN(t, "kc-empty-cn", "default", []string{"ops-team"})
 	fakeClient := fake.NewSimpleClientset(secret)
