@@ -73,6 +73,18 @@ func WithCustomSyncers(syncers map[string]ResourceSyncerBuilder) ConnectorOption
 	}
 }
 
+// secretsScanResult is the sealed result produced by kubeUserBuilder.List() Phase 3.
+// It is built page-by-page into secretsAccumulator and sealed on the last secrets page.
+// kubeGroupBuilder.Grants() reads secretsResult directly — no independent scanning.
+type secretsScanResult struct {
+	// Usernames holds deduplicated x509 CommonNames.
+	// Only non-empty CNs are included (matching original kubeUserBuilder Phase 3 behavior).
+	Usernames []string
+	// GroupMembers maps Kubernetes group name (x509 Organization field) to principal names.
+	// Falls back to the kubeconfig username key when CN is empty (preserving original Grants behavior).
+	GroupMembers map[string][]string
+}
+
 // Kubernetes connector struct.
 type Kubernetes struct {
 	client kubernetes.Interface
@@ -84,6 +96,11 @@ type Kubernetes struct {
 	clusterRoleBindingsCache []rbacv1.ClusterRoleBinding
 	bindingsMutex            sync.RWMutex
 	bindingsLoaded           bool
+
+	// Secrets scan cache: written by kubeUserBuilder Phase 3, read by kubeGroupBuilder Grants.
+	secretsAccumulator *secretsScanResult // live during Phase 3 pagination
+	secretsResult      *secretsScanResult // sealed after Phase 3 last page; read-only thereafter
+	secretsMu          sync.RWMutex
 }
 
 // New creates a new Kubernetes connector.
@@ -188,10 +205,10 @@ func (k *Kubernetes) ResourceSyncers(ctx context.Context) []connectorbuilder.Res
 			return newPodBuilder(k.client)
 		},
 		ResourceTypeKubeUser.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncer {
-			return newKubeUserBuilder(k.client)
+			return newKubeUserBuilder(k.client, k)
 		},
 		ResourceTypeKubeGroup.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncer {
-			return newKubeGroupBuilder(k.client)
+			return newKubeGroupBuilder(k.client, k)
 		},
 	}
 

@@ -26,8 +26,8 @@ const (
 
 // kubeUserBuilder syncs Kubernetes users referenced in RBAC bindings and kubeconfig Secrets.
 type kubeUserBuilder struct {
-	client kubernetes.Interface
-	// Cache to avoid duplicate work when extracting users from bindings
+	client        kubernetes.Interface
+	k8s           *Kubernetes
 	userCache     map[string]bool
 	userCacheLock sync.RWMutex
 }
@@ -144,27 +144,47 @@ func (k *kubeUserBuilder) List(ctx context.Context, parentResourceID *v2.Resourc
 		return rv, nextToken, nil, nil
 	}
 
-	// Phase 3: Discover users from x509 client certificates in kubeconfig Secrets.
-	// This ensures cert-based users who appear in group member grants are synced as resources.
+	// Phase 3: Discover cert-based users and accumulate group membership data.
+	// No internal pagination loop: the SDK calls List() once per page via the bag token.
+	// The accumulator is initialized on the first page and sealed on the last page.
 	if phase == phaseSecrets {
+		continueToken := bag.PageToken()
 		opts := metav1.ListOptions{
 			Limit:    ResourcesPageSize,
-			Continue: bag.PageToken(),
+			Continue: continueToken,
 		}
 
-		l.Debug("fetching secrets to discover cert-based users", zap.String("continue_token", opts.Continue))
+		// Initialize the accumulator on the first Phase 3 page (empty continue token).
+		if continueToken == "" {
+			k.k8s.secretsMu.Lock()
+			k.k8s.secretsAccumulator = &secretsScanResult{
+				GroupMembers: make(map[string][]string),
+			}
+			k.k8s.secretsMu.Unlock()
+		}
+
+		l.Debug("fetching secrets page", zap.String("continue_token", continueToken))
 		resp, err := k.client.CoreV1().Secrets("").List(ctx, opts)
 		if err != nil {
 			return nil, "", nil, fmt.Errorf("failed to list secrets: %w", err)
 		}
 
+		// certEntry holds parsed data from one kubeconfig auth entry.
+		type certEntry struct {
+			cn            string   // x509 CN; non-empty entries go into Usernames
+			principalName string   // cn or kubeconfig username fallback; goes into GroupMembers
+			orgs          []string // x509 Organization fields (group names)
+		}
+
+		// Parse certs outside the lock (CPU-bound).
+		var entries []certEntry
 		for _, secret := range resp.Items {
 			for _, data := range secret.Data {
 				kubecfg, err := clientcmd.Load(data)
 				if err != nil {
-					continue
+					continue // not a kubeconfig
 				}
-				for _, authInfo := range kubecfg.AuthInfos {
+				for username, authInfo := range kubecfg.AuthInfos {
 					if len(authInfo.ClientCertificateData) == 0 {
 						continue
 					}
@@ -172,13 +192,44 @@ func (k *kubeUserBuilder) List(ctx context.Context, parentResourceID *v2.Resourc
 					if err != nil || len(certs) == 0 {
 						continue
 					}
-					// Use the CN from the certificate as the Kubernetes username
-					cn := certs[0].Subject.CommonName
-					if cn != "" {
-						k.processUser(ctx, cn, &rv)
+					cert := certs[0]
+					cn := cert.Subject.CommonName
+					// Preserve original Grants() fallback: use kubeconfig key when CN is empty.
+					principalName := cn
+					if principalName == "" {
+						principalName = username
 					}
+					if principalName == "" {
+						continue
+					}
+					entries = append(entries, certEntry{
+						cn:            cn,
+						principalName: principalName,
+						orgs:          cert.Subject.Organization,
+					})
 				}
 			}
+		}
+
+		// Merge into the accumulator under the lock; collect new CNs to emit as user resources.
+		var newCNs []string
+		k.k8s.secretsMu.Lock()
+		acc := k.k8s.secretsAccumulator
+		for _, e := range entries {
+			if e.cn != "" && !containsString(acc.Usernames, e.cn) {
+				acc.Usernames = append(acc.Usernames, e.cn)
+				newCNs = append(newCNs, e.cn)
+			}
+			for _, org := range e.orgs {
+				acc.GroupMembers[org] = append(acc.GroupMembers[org], e.principalName)
+			}
+		}
+		k.k8s.secretsMu.Unlock()
+
+		// Emit user resources outside the lock (processUser uses its own userCacheLock
+		// and handles deduplication against users already seen in Phases 1 and 2).
+		for _, cn := range newCNs {
+			k.processUser(ctx, cn, &rv)
 		}
 
 		if resp.Continue != "" {
@@ -188,6 +239,12 @@ func (k *kubeUserBuilder) List(ctx context.Context, parentResourceID *v2.Resourc
 			}
 			return rv, nextToken, nil, nil
 		}
+
+		// Last page: seal the accumulator into the final read-only result.
+		k.k8s.secretsMu.Lock()
+		k.k8s.secretsResult = k.k8s.secretsAccumulator
+		k.k8s.secretsAccumulator = nil
+		k.k8s.secretsMu.Unlock()
 	}
 
 	// All phases complete.
@@ -277,9 +334,10 @@ func (k *kubeUserBuilder) Grants(_ context.Context, resource *v2.Resource, _ *pa
 }
 
 // newKubeUserBuilder creates a new kube user builder.
-func newKubeUserBuilder(client kubernetes.Interface) *kubeUserBuilder {
+func newKubeUserBuilder(client kubernetes.Interface, k8s *Kubernetes) *kubeUserBuilder {
 	return &kubeUserBuilder{
 		client:    client,
+		k8s:       k8s,
 		userCache: make(map[string]bool),
 	}
 }
