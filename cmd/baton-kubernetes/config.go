@@ -179,7 +179,7 @@ var (
 		field.WithDescription("Sync StatefulSet resources (disabled by default)"),
 		field.WithDefaultValue(false),
 	)
-	syncDaemonSetsField   = field.BoolField(
+	syncDaemonSetsField = field.BoolField(
 		flagSyncDaemonSets,
 		field.WithDescription("Sync DaemonSet resources (disabled by default)"),
 		field.WithDefaultValue(false),

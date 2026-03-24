@@ -21,12 +21,19 @@ import (
 	"go.uber.org/zap"
 )
 
+const phasePreloadCache = "pre-load-cache"
+
 // kubeGroupBuilder syncs Kubernetes groups referenced in RBAC bindings as Baton groups.
 type kubeGroupBuilder struct {
 	client kubernetes.Interface
 	// Cache to avoid duplicate work when extracting groups from bindings
 	groupCache     map[string]bool
 	groupCacheLock sync.RWMutex
+	// grantsAccumulator collects group→principals while paging through secrets.
+	// grantsCache is nil until all secret pages have been scanned; once set it is never mutated.
+	grantsAccumulator map[string][]string
+	grantsCache       map[string][]string
+	grantsCacheLock   sync.RWMutex
 }
 
 // ResourceType returns the resource type for KubeGroup.
@@ -222,48 +229,62 @@ func (k *kubeGroupBuilder) Entitlements(_ context.Context, resource *v2.Resource
 // Grants returns grants for Group resources by inspecting x509 client certificates in kubeconfig Secrets.
 // Group membership in Kubernetes is encoded in the O= (Organization) field of x509 client certificates.
 // Note: OIDC and webhook-based group membership is out of scope.
+//
+// Secret pages are scanned one at a time through the bag pagination mechanism using the
+// phasePreloadCache phase. On the first call for any group the phase is pushed onto the bag and
+// scanning begins. Each subsequent call fetches one more secrets page and accumulates a
+// groupName → []principalName map for ALL groups simultaneously. Once the last page is reached
+// the map is promoted to grantsCache and grants for the requested group are emitted. Every
+// subsequent group skips scanning entirely and does a direct cache lookup.
 func (k *kubeGroupBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
 	l := ctxzap.Extract(ctx)
-	groupName := resource.Id.Resource
 
-	// Parse pagination token
+	// Fast path: cache already fully built — skip scanning and emit grants directly.
+	k.grantsCacheLock.RLock()
+	cacheReady := k.grantsCache != nil
+	k.grantsCacheLock.RUnlock()
+	if cacheReady {
+		return k.emitGrants(resource), "", nil, nil
+	}
+
 	bag, err := ParsePageToken(pToken.Token)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("failed to parse page token: %w", err)
 	}
 
-	// Set up list options with pagination
+	// First call for this group (empty bag): initialize the accumulator and start scanning.
+	// Subsequent calls carry phasePreloadCache with the K8s continue token.
+	if bag.ResourceTypeID() == "" {
+		k.grantsCacheLock.Lock()
+		k.grantsAccumulator = make(map[string][]string)
+		k.grantsCacheLock.Unlock()
+	}
+
+	// Fetch one secrets page. On the first call the continue token is empty (first page);
+	// on subsequent calls it is whatever K8s returned on the previous page.
 	opts := metav1.ListOptions{
 		Limit:    ResourcesPageSize,
 		Continue: bag.PageToken(),
 	}
-
-	// Fetch secrets from the Kubernetes API across all namespaces
-	l.Debug("fetching secrets for group grants", zap.String("group", groupName), zap.String("continue_token", opts.Continue))
+	l.Debug("fetching secrets for grants cache", zap.String("continue_token", opts.Continue))
 	resp, err := k.client.CoreV1().Secrets("").List(ctx, opts)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("failed to list secrets: %w", err)
 	}
 
-	var grants []*v2.Grant
-
-	// Process each secret, looking for kubeconfig data containing x509 client certificates
+	// Parse secrets outside the lock — clientcmd.Load and certificate parsing are CPU-bound
+	// and should not block other readers of the struct.
+	pageResults := make(map[string][]string)
 	for _, secret := range resp.Items {
 		for dataKey, data := range secret.Data {
-			// Try to parse the secret value as a kubeconfig
 			kubecfg, err := clientcmd.Load(data)
 			if err != nil {
-				// Not a kubeconfig, skip
-				continue
+				continue // not a kubeconfig
 			}
-
-			// For each user in the kubeconfig, check if their certificate includes this group
 			for username, authInfo := range kubecfg.AuthInfos {
 				if len(authInfo.ClientCertificateData) == 0 {
 					continue
 				}
-
-				// Parse x509 certificates from PEM data
 				certs, err := parseCertsFromPEM(authInfo.ClientCertificateData)
 				if err != nil || len(certs) == 0 {
 					l.Warn("failed to parse client certificate",
@@ -273,36 +294,53 @@ func (k *kubeGroupBuilder) Grants(ctx context.Context, resource *v2.Resource, pT
 						zap.Error(err))
 					continue
 				}
-
-				// Use the leaf certificate to check organization membership
 				cert := certs[0]
+				principalName := cert.Subject.CommonName
+				if principalName == "" {
+					principalName = username
+				}
 				for _, org := range cert.Subject.Organization {
-					if org != groupName {
-						continue
-					}
-
-					// Prefer the CN from the certificate as the Kubernetes username
-					principalName := cert.Subject.CommonName
-					if principalName == "" {
-						principalName = username
-					}
-
-					principalResource := GenerateResourceForGrant(principalName, ResourceTypeKubeUser.Id)
-					g := grant.NewGrant(resource, "member", principalResource)
-					grants = append(grants, g)
-					break // one grant per user per group
+					pageResults[org] = append(pageResults[org], principalName)
 				}
 			}
 		}
 	}
 
-	// Handle pagination
-	nextPageToken, err := HandleKubePagination(&resp.ListMeta, bag)
-	if err != nil {
-		return nil, "", nil, fmt.Errorf("failed to handle pagination: %w", err)
+	// Merge page results into the accumulator under the lock.
+	k.grantsCacheLock.Lock()
+	for org, principals := range pageResults {
+		k.grantsAccumulator[org] = append(k.grantsAccumulator[org], principals...)
 	}
 
-	return grants, nextPageToken, nil, nil
+	if resp.Continue != "" {
+		// More secret pages remain — return next page token, no grants emitted yet.
+		k.grantsCacheLock.Unlock()
+		token, err := marshalPhaseToken(phasePreloadCache, resp.Continue)
+		if err != nil {
+			return nil, "", nil, err
+		}
+		return nil, token, nil, nil
+	}
+
+	// Last page: promote accumulator to cache.
+	k.grantsCache = k.grantsAccumulator
+	k.grantsAccumulator = nil
+	k.grantsCacheLock.Unlock()
+
+	return k.emitGrants(resource), "", nil, nil
+}
+
+// emitGrants builds the grant slice for resource from the completed grantsCache.
+func (k *kubeGroupBuilder) emitGrants(resource *v2.Resource) []*v2.Grant {
+	k.grantsCacheLock.RLock()
+	principals := k.grantsCache[resource.Id.Resource]
+	k.grantsCacheLock.RUnlock()
+	grants := make([]*v2.Grant, 0, len(principals))
+	for _, principalName := range principals {
+		principalResource := GenerateResourceForGrant(principalName, ResourceTypeKubeUser.Id)
+		grants = append(grants, grant.NewGrant(resource, "member", principalResource))
+	}
+	return grants
 }
 
 // parseCertsFromPEM parses x509 certificates from PEM-encoded data.
