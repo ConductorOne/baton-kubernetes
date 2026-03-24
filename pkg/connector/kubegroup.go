@@ -59,16 +59,6 @@ func (k *kubeGroupBuilder) List(ctx context.Context, parentResourceID *v2.Resour
 	}
 	k.groupCacheLock.Unlock()
 
-	// Always create built-in system groups on the first call.
-	builtInGroups := []string{
-		"system:masters",
-		"system:authenticated",
-		"system:unauthenticated",
-	}
-	for _, groupName := range builtInGroups {
-		k.processGroup(ctx, groupName, &rv)
-	}
-
 	// Parse pagination token
 	bag, err := ParsePageToken(pToken.Token)
 	if err != nil {
@@ -79,6 +69,17 @@ func (k *kubeGroupBuilder) List(ctx context.Context, parentResourceID *v2.Resour
 	phase := bag.ResourceTypeID()
 	if phase == "" {
 		phase = phaseRoleBindings
+	}
+
+	// Emit built-in system groups only on the very first page to avoid redundant cache lookups.
+	if phase == phaseRoleBindings && bag.PageToken() == "" {
+		for _, groupName := range []string{
+			"system:masters",
+			"system:authenticated",
+			"system:unauthenticated",
+		} {
+			k.processGroup(ctx, groupName, &rv)
+		}
 	}
 
 	// Phase 1: Process RoleBindings
