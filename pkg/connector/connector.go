@@ -3,12 +3,15 @@ package connector
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/connectorbuilder"
 	"github.com/conductorone/baton-sdk/pkg/uhttp"
+	pkgconfig "github.com/conductorone/baton-kubernetes/pkg/config"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"go.uber.org/zap"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -16,6 +19,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	clioptions "k8s.io/cli-runtime/pkg/genericclioptions"
+	pointer "k8s.io/utils/ptr"
 )
 
 const (
@@ -103,8 +108,137 @@ type Kubernetes struct {
 	secretsMu          sync.RWMutex
 }
 
-// New creates a new Kubernetes connector.
-func New(ctx context.Context, cfg *rest.Config, opts ...ConnectorOption) (*Kubernetes, error) {
+// New creates a Kubernetes connector from the typed configuration struct.
+// It validates kubeconfig paths, builds a REST config, and assembles the
+// list of resource types to sync.
+func New(ctx context.Context, cfg *pkgconfig.Kubernetes) (*Kubernetes, error) {
+	opt := clioptions.NewConfigFlags(true)
+
+	// --- Kubeconfig source resolution ---
+	if cfg.Kubeconfig != "" {
+		if _, err := os.Stat(cfg.Kubeconfig); err != nil {
+			if os.IsNotExist(err) {
+				return nil, fmt.Errorf("specified kubeconfig file does not exist: %s", cfg.Kubeconfig)
+			}
+			return nil, fmt.Errorf("error accessing kubeconfig file: %w", err)
+		}
+		opt.KubeConfig = pointer.To(cfg.Kubeconfig)
+	} else {
+		// No explicit kubeconfig source. Verify that at least one implicit source
+		// is available: the default kubeconfig file or an in-cluster service account.
+		// client-go silently falls back to localhost:8080 when neither exists, which
+		// produces a confusing "connection refused" error instead of a missing-auth message.
+		defaultKubeconfig := filepath.Join(os.Getenv("HOME"), ".kube", "config")
+		inClusterToken := "/var/run/secrets/kubernetes.io/serviceaccount/token"
+		_, defaultErr := os.Stat(defaultKubeconfig)
+		_, inClusterErr := os.Stat(inClusterToken)
+		if os.IsNotExist(defaultErr) && os.IsNotExist(inClusterErr) {
+			return nil, fmt.Errorf("no kubeconfig available: %s does not exist and no in-cluster service account found; "+
+				"provide a kubeconfig via --kubeconfig or the KUBECONFIG environment variable", defaultKubeconfig)
+		}
+	}
+
+	// --- Populate ConfigFlags from typed struct (zero-value guards replace v.IsSet) ---
+	if cfg.CacheDir != "" {
+		opt.CacheDir = pointer.To(cfg.CacheDir)
+	}
+	if cfg.ClientCertificate != "" {
+		opt.CertFile = pointer.To(cfg.ClientCertificate)
+	}
+	if cfg.ClientKey != "" {
+		opt.KeyFile = pointer.To(cfg.ClientKey)
+	}
+	if cfg.Token != "" {
+		opt.BearerToken = pointer.To(cfg.Token)
+	}
+	if cfg.As != "" {
+		opt.Impersonate = pointer.To(cfg.As)
+	}
+	if cfg.AsUid != "" {
+		opt.ImpersonateUID = pointer.To(cfg.AsUid)
+	}
+	if len(cfg.AsGroup) > 0 {
+		opt.ImpersonateGroup = &cfg.AsGroup
+	}
+	if cfg.Username != "" {
+		opt.Username = pointer.To(cfg.Username)
+	}
+	if cfg.Password != "" {
+		opt.Password = pointer.To(cfg.Password)
+	}
+	if cfg.Cluster != "" {
+		opt.ClusterName = pointer.To(cfg.Cluster)
+	}
+	if cfg.User != "" {
+		opt.AuthInfoName = pointer.To(cfg.User)
+	}
+	if cfg.Namespace != "" {
+		opt.Namespace = pointer.To(cfg.Namespace)
+	}
+	if cfg.Context != "" {
+		opt.Context = pointer.To(cfg.Context)
+	}
+	if cfg.Server != "" {
+		opt.APIServer = pointer.To(cfg.Server)
+	}
+	if cfg.TlsServerName != "" {
+		opt.TLSServerName = pointer.To(cfg.TlsServerName)
+	}
+	// Bools: always assign (struct zero value matches ConfigFlags default, so harmless)
+	opt.Insecure = pointer.To(cfg.InsecureSkipTlsVerify)
+	if cfg.CertificateAuthority != "" {
+		opt.CAFile = pointer.To(cfg.CertificateAuthority)
+	}
+	// RequestTimeout: WithDefaultValue("0") means cfg.RequestTimeout is always "0" when unset;
+	// ConfigFlags default is also "0", so unconditional assignment is safe.
+	opt.Timeout = pointer.To(cfg.RequestTimeout)
+	opt.DisableCompression = pointer.To(cfg.DisableCompression)
+
+	// --- Build REST config ---
+	l := ctxzap.Extract(ctx)
+	restConfig, err := opt.ToRESTConfig()
+	if err != nil {
+		l.Error("error creating rest config", zap.Error(err))
+		return nil, fmt.Errorf("failed to create Kubernetes REST config: %w. Ensure you have a valid kubeconfig file or in-cluster configuration", err)
+	}
+	if restConfig == nil {
+		l.Error("unexpectedly got nil REST config")
+		return nil, fmt.Errorf("failed to create Kubernetes REST config: unexpectedly got nil config")
+	}
+
+	// --- Assemble syncResources list ---
+	// Core RBAC resources are always included. Workload/config resources are opt-in
+	// via flags because they expose verb entitlements that never produce grants,
+	// resulting in noisy partial resources in ConductorOne.
+	syncResources := []string{
+		"namespace",
+		"service_account",
+		"role",
+		"cluster_role",
+		"kube_user",
+		"kube_group",
+	}
+	optionalResources := map[string]bool{
+		"configmap":   cfg.SyncConfigMaps,
+		"secret":      cfg.SyncSecrets,
+		"pod":         cfg.SyncPods,
+		"node":        cfg.SyncNodes,
+		"deployment":  cfg.SyncDeployments,
+		"statefulset": cfg.SyncStatefulSets,
+		"daemonset":   cfg.SyncDaemonSets,
+	}
+	for resourceID, enabled := range optionalResources {
+		if enabled {
+			syncResources = append(syncResources, resourceID)
+		}
+	}
+
+	return newFromRESTConfig(ctx, restConfig, WithSyncResources(syncResources))
+}
+
+// newFromRESTConfig creates a Kubernetes connector from a pre-built REST config.
+// Used internally by New and by tests that construct their own REST configs.
+func newFromRESTConfig(ctx context.Context, cfg *rest.Config, opts ...ConnectorOption) (*Kubernetes, error) {
 	// Validate that config is not nil
 	if cfg == nil {
 		return nil, fmt.Errorf("kubernetes REST config cannot be nil")
