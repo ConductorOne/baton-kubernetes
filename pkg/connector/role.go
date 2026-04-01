@@ -106,7 +106,7 @@ func roleResource(role *rbacv1.Role) (*v2.Resource, error) {
 
 	// Create resource as a role with parent namespace
 	resource, err := rs.NewRoleResource(
-		role.Name,
+		fmt.Sprintf("%s (%s)", role.Name, role.Namespace),
 		ResourceTypeRole,
 		rawID, // Pass the raw ID directly
 		[]rs.RoleTraitOption{rs.WithRoleProfile(profile)},
