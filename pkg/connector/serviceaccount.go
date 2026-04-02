@@ -129,7 +129,7 @@ func serviceAccountResource(serviceAccount *corev1.ServiceAccount) (*v2.Resource
 
 	// Create resource with parent namespace
 	resource, err := rs.NewUserResource(
-		serviceAccount.Name,
+		fmt.Sprintf("%s (%s)", serviceAccount.Name, serviceAccount.Namespace),
 		ResourceTypeServiceAccount,
 		rawID,
 		[]rs.UserTraitOption{

@@ -65,7 +65,7 @@ func TestRoleBuilderList(t *testing.T) {
 
 	// Assertions
 	require.NoError(t, err)
-	assert.Equal(t, "test-role", resource.DisplayName)
+	assert.Equal(t, "test-role (test-ns)", resource.DisplayName)
 	assert.Equal(t, "test-ns/test-role", resource.Id.Resource)
 	assert.Equal(t, ResourceTypeRole.Id, resource.Id.ResourceType)
 }

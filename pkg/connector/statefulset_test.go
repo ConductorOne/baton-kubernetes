@@ -64,8 +64,8 @@ func TestStatefulSetResource(t *testing.T) {
 	assert.Equal(t, parentID, resource.ParentResourceId)
 
 	// Check external ID
-	require.NotNil(t, resource.ExternalId)
-	assert.Equal(t, "test-uid", resource.ExternalId.Id)
+	require.NotNil(t, resource.GetExternalId())                   //nolint:staticcheck // deprecated but still used by SDK provisioner
+	assert.Equal(t, "test-uid", resource.GetExternalId().GetId()) //nolint:staticcheck // deprecated but still used by SDK provisioner
 }
 
 func TestStatefulSetBuilderList(t *testing.T) {
