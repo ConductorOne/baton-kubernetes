@@ -340,7 +340,7 @@ func (c *clusterRoleBuilder) Grant(ctx context.Context, principal *v2.Resource, 
 			},
 			RoleRef: rbacv1.RoleRef{
 				APIGroup: RBACAPIGroup,
-				Kind:     "ClusterRole",
+				Kind:     RoleRefKindClusterRole,
 				Name:     clusterRoleName,
 			},
 			Subjects: []rbacv1.Subject{subject},
@@ -370,7 +370,7 @@ func (c *clusterRoleBuilder) Grant(ctx context.Context, principal *v2.Resource, 
 			},
 			RoleRef: rbacv1.RoleRef{
 				APIGroup: RBACAPIGroup,
-				Kind:     "ClusterRole",
+				Kind:     RoleRefKindClusterRole,
 				Name:     clusterRoleName,
 			},
 			Subjects: []rbacv1.Subject{subject},
@@ -450,7 +450,7 @@ func (c *clusterRoleBuilder) revokeSubjectFromClusterRoleBindings(ctx context.Co
 		}
 
 		for _, binding := range bindings.Items {
-			if binding.RoleRef.Kind != "ClusterRole" || binding.RoleRef.Name != clusterRoleName {
+			if binding.RoleRef.Kind != RoleRefKindClusterRole || binding.RoleRef.Name != clusterRoleName {
 				continue
 			}
 			if updated, found := removeSubject(binding.Subjects, subject); found {
@@ -496,7 +496,7 @@ func (c *clusterRoleBuilder) revokeNamespaceScoped(ctx context.Context, clusterR
 	}
 
 	for _, binding := range bindings.Items {
-		if binding.RoleRef.Kind != "ClusterRole" || binding.RoleRef.Name != clusterRoleName {
+		if binding.RoleRef.Kind != RoleRefKindClusterRole || binding.RoleRef.Name != clusterRoleName {
 			continue
 		}
 		if updated, found := removeSubject(binding.Subjects, subject); found {
