@@ -85,11 +85,11 @@ func (n *namespaceBuilder) List(ctx context.Context, parentResourceID *v2.Resour
 func namespaceResource(ns *corev1.Namespace) (*v2.Resource, error) {
 	// Prepare profile with standard metadata
 	profile := map[string]interface{}{
-		"name":              ns.Name,
-		"uid":               string(ns.UID),
-		"creationTimestamp": ns.CreationTimestamp.String(),
-		"labels":            StringMapToAnyMap(ns.Labels),
-		"annotations":       StringMapToAnyMap(ns.Annotations),
+		metadataKeyName:              ns.Name,
+		metadataKeyUID:               string(ns.UID),
+		metadataKeyCreationTimestamp: ns.CreationTimestamp.String(),
+		metadataKeyLabels:            StringMapToAnyMap(ns.Labels),
+		metadataKeyAnnotations:       StringMapToAnyMap(ns.Annotations),
 	}
 
 	// Add status phase if available

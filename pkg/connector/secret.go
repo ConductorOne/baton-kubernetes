@@ -21,7 +21,7 @@ import (
 
 // Standard verb entitlements for Kubernetes resources.
 var standardResourceVerbs = []string{
-	"get",
+	verbGet,
 	"list",
 	"watch",
 	"create",
@@ -111,13 +111,13 @@ func secretResource(secret *corev1.Secret) (*v2.Resource, error) {
 
 	// Create profile with standard metadata
 	profile := map[string]interface{}{
-		"name":              secret.Name,
-		"namespace":         secret.Namespace,
-		"uid":               string(secret.UID),
-		"creationTimestamp": secret.CreationTimestamp.String(),
-		"labels":            StringMapToAnyMap(secret.Labels),
-		"annotations":       StringMapToAnyMap(secret.Annotations),
-		"type":              string(secret.Type),
+		metadataKeyName:              secret.Name,
+		metadataKeyNamespace:         secret.Namespace,
+		metadataKeyUID:               string(secret.UID),
+		metadataKeyCreationTimestamp: secret.CreationTimestamp.String(),
+		metadataKeyLabels:            StringMapToAnyMap(secret.Labels),
+		metadataKeyAnnotations:       StringMapToAnyMap(secret.Annotations),
+		"type":                       string(secret.Type),
 	}
 
 	// Classify the secret's cryptographic kind onto the NHI spine.

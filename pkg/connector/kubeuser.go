@@ -70,7 +70,7 @@ func (k *kubeUserBuilder) List(ctx context.Context, parentResourceID *v2.Resourc
 		// Extract user subjects from bindings
 		for _, binding := range resp.Items {
 			for _, subject := range binding.Subjects {
-				if subject.Kind == "User" {
+				if subject.Kind == SubjectKindUser {
 					// Process user
 					k.processUser(ctx, subject.Name, &rv)
 				}
@@ -89,11 +89,11 @@ func (k *kubeUserBuilder) List(ctx context.Context, parentResourceID *v2.Resourc
 
 		// Prepare for phase 2
 		bag = &pagination.Bag{}
-		bag.Push(pagination.PageState{Token: "clusterrolebindings"})
+		bag.Push(pagination.PageState{Token: ResourceTypeClusterRoleBindings})
 	}
 
 	// Phase 2: Process ClusterRoleBindings
-	if pageState == "clusterrolebindings" {
+	if pageState == ResourceTypeClusterRoleBindings {
 		// Set up list options with pagination
 		opts := metav1.ListOptions{
 			Limit:    ResourcesPageSize,
@@ -110,7 +110,7 @@ func (k *kubeUserBuilder) List(ctx context.Context, parentResourceID *v2.Resourc
 		// Extract user subjects from bindings
 		for _, binding := range resp.Items {
 			for _, subject := range binding.Subjects {
-				if subject.Kind == "User" {
+				if subject.Kind == SubjectKindUser {
 					// Process user
 					k.processUser(ctx, subject.Name, &rv)
 				}
@@ -164,7 +164,7 @@ func (k *kubeUserBuilder) processUser(ctx context.Context, username string, reso
 func (k *kubeUserBuilder) kubeUserResource(username string) (*v2.Resource, error) {
 	// Create profile
 	profile := map[string]interface{}{
-		"name": username,
+		metadataKeyName: username,
 	}
 
 	// Create resource with user trait options

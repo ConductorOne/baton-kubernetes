@@ -25,13 +25,27 @@ const (
 	ResourceTypeRoleBinding         = "rolebinding"
 	SubjectTypeGroup                = "Group"
 	SubjectTypeUser                 = "User"
+
+	// Standard Kubernetes object-metadata keys used in resource profiles.
+	metadataKeyName              = "name"
+	metadataKeyNamespace         = "namespace"
+	metadataKeyUID               = "uid"
+	metadataKeyCreationTimestamp = "creationTimestamp"
+	metadataKeyLabels            = "labels"
+	metadataKeyAnnotations       = "annotations"
+
+	// verbGet is the Kubernetes "get" RBAC verb.
+	verbGet = "get"
+
+	// kindRole is the RBAC RoleRef kind for namespaced Roles.
+	kindRole = "Role"
 )
 
 // Resource type definitions.
 var (
 	ResourceTypeNamespace      = &v2.ResourceType{Id: "namespace", DisplayName: "Namespace"}
 	ResourceTypeServiceAccount = &v2.ResourceType{Id: "service_account", DisplayName: "Service Account", Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_USER}}
-	ResourceTypeRole           = &v2.ResourceType{Id: "role", DisplayName: "Role", Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_ROLE}}
+	ResourceTypeRole           = &v2.ResourceType{Id: "role", DisplayName: kindRole, Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_ROLE}}
 	ResourceTypeClusterRole    = &v2.ResourceType{Id: "cluster_role", DisplayName: "Cluster Role", Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_ROLE}}
 	ResourceTypeSecret         = &v2.ResourceType{Id: "secret", DisplayName: "Secret", Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_SECRET}}
 	ResourceTypeConfigMap      = &v2.ResourceType{Id: "configmap", DisplayName: "Config Map"}
@@ -348,7 +362,7 @@ func (k *Kubernetes) GetMatchingRoleBindings(ctx context.Context, namespace, rol
 
 	var result []rbacv1.RoleBinding
 	for _, binding := range k.roleBindingsCache {
-		if binding.Namespace == namespace && binding.RoleRef.Kind == "Role" && binding.RoleRef.Name == roleName {
+		if binding.Namespace == namespace && binding.RoleRef.Kind == kindRole && binding.RoleRef.Name == roleName {
 			result = append(result, binding)
 		}
 	}

@@ -59,8 +59,8 @@ func generateWildcardResource(resourceType *v2.ResourceType) (*v2.Resource, erro
 
 	// Create basic profile data
 	profile := map[string]interface{}{
-		"name": displayName,
-		"uid":  "wildcard-" + resourceType.Id,
+		metadataKeyName: displayName,
+		metadataKeyUID:  "wildcard-" + resourceType.Id,
 	}
 
 	// Handle different resource types differently to add appropriate traits.
