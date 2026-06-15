@@ -43,7 +43,7 @@ var (
 	cacheDirField    = field.StringField(flagCacheDir, field.WithDescription("Default cache directory"))
 	certFileField    = field.StringField(flagCertFile, field.WithDescription("Path to a client certificate file for TLS"), field.WithRequired(false))
 	keyFileField     = field.StringField(flagKeyFile, field.WithDescription("Path to a client key file for TLS"), field.WithRequired(false))
-	bearerTokenField = field.StringField(flagBearerToken, field.WithDescription("Bearer token for authentication to the API server"), field.WithRequired(false))
+	bearerTokenField = field.StringField(flagBearerToken, field.WithDescription("Bearer token for authentication to the API server"), field.WithRequired(false), field.WithIsSecret(true))
 	impersonateField = field.StringField(flagImpersonate,
 		field.WithDescription("Username to impersonate for the operation. User could be a regular user or a service account in a namespace."), field.WithRequired(false))
 	impersonateUIDField = field.StringField(flagImpersonateUID,
