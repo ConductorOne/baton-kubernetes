@@ -148,15 +148,16 @@ func GrantRoleToSubject(subject rbacv1.Subject, resource *v2.Resource, entName s
 	} else if (subject.APIGroup == RBACAPIGroup || subject.APIGroup == RBACAPIGroupV1) &&
 		!strings.Contains(subject.Name, "system:") { // Ignore System subjects
 		if subject.Kind == SubjectKindGroup {
+			// Group grants intentionally carry no GrantExpandable annotation: vanilla
+			// Kubernetes has no membership source to expand through (membership lives
+			// in the authenticator — x509 O= fields, OIDC claims, cloud IAM mappers).
+			// Cloud connectors (EKS/AKS/GKE) add their own expansion annotations paired
+			// with ExternalResourceMatch in their custom builders.
 			groupResource := GenerateResourceForGrant(subject.Name, ResourceTypeKubeGroup.Id)
 			g := grant.NewGrant(
 				resource,
 				entName,
 				groupResource,
-				grant.WithAnnotation(&v2.GrantExpandable{
-					EntitlementIds:  []string{fmt.Sprintf("kube_group:%s:member", subject.Name)},
-					ResourceTypeIds: []string{ResourceTypeKubeUser.Id},
-				}),
 			)
 			return g, nil
 		}
