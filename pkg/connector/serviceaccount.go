@@ -133,10 +133,10 @@ func serviceAccountResource(serviceAccount *corev1.ServiceAccount) (*v2.Resource
 		ResourceTypeServiceAccount,
 		rawID,
 		[]rs.UserTraitOption{
-			rs.WithUserProfile(profile),
 			rs.WithAccountType(v2.UserTrait_ACCOUNT_TYPE_SERVICE),
 		},
 		rs.WithParentResourceID(parentID),
+		rs.WithResourceProfile(profile),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create service account resource: %w", err)

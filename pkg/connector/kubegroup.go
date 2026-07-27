@@ -181,17 +181,13 @@ func (k *kubeGroupBuilder) kubeGroupResource(groupName string) (*v2.Resource, er
 		profileKeyName: groupName,
 	}
 
-	// Create resource with group trait options
-	groupOptions := []rs.GroupTraitOption{
-		rs.WithGroupProfile(profile),
-	}
-
 	// Create group resource
 	resource, err := rs.NewGroupResource(
 		groupName,
 		ResourceTypeKubeGroup,
 		groupName,
-		groupOptions,
+		nil,
+		rs.WithResourceProfile(profile),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create group resource: %w", err)

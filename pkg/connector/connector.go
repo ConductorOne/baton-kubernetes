@@ -132,10 +132,12 @@ func NewFromConfig(ctx context.Context, cfg *pkgconfig.Kubernetes) (*Kubernetes,
 		// is available: the default kubeconfig file or an in-cluster service account.
 		// client-go silently falls back to localhost:8080 when neither exists, which
 		// produces a confusing "connection refused" error instead of a missing-auth message.
-		defaultKubeconfig := filepath.Join(os.Getenv("HOME"), ".kube", "config")
-		inClusterToken := "/var/run/secrets/kubernetes.io/serviceaccount/token"
+		defaultKubeconfig := filepath.Clean(filepath.Join(os.Getenv("HOME"), ".kube", "config"))
+		// inClusterTokenPath is the well-known, fixed mount path for the in-cluster
+		// service account token; it is not a credential value.
+		inClusterTokenPath := "/var/run/secrets/kubernetes.io/serviceaccount/token" //nolint:gosec // well-known in-cluster service account token mount path, not a credential
 		_, defaultErr := os.Stat(defaultKubeconfig)
-		_, inClusterErr := os.Stat(inClusterToken)
+		_, inClusterErr := os.Stat(inClusterTokenPath)
 		if os.IsNotExist(defaultErr) && os.IsNotExist(inClusterErr) {
 			return nil, fmt.Errorf("no kubeconfig available: %s does not exist and no in-cluster service account found; "+
 				"provide a kubeconfig via --kubeconfig or the KUBECONFIG environment variable", defaultKubeconfig)

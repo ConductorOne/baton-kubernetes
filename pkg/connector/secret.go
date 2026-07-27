@@ -15,7 +15,6 @@ import (
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"go.uber.org/zap"
-	"google.golang.org/protobuf/types/known/structpb"
 )
 
 // verbGet is the standard Kubernetes RBAC read verb, declared as a constant
@@ -123,25 +122,12 @@ func secretResource(secret *corev1.Secret) (*v2.Resource, error) {
 		"type":                      string(secret.Type),
 	}
 
-	// Secret trait options
-	secretOptions := []rs.SecretTraitOption{
-		// Set creation time from metadata
-		rs.WithSecretCreatedAt(secret.CreationTimestamp.Time),
-		// Create a custom trait option for the profile
-		func(t *v2.SecretTrait) error {
-			profileStruct, err := structpb.NewStruct(profile)
-			if err != nil {
-				return err
-			}
-			t.Profile = profileStruct
-			return nil
-		},
-	}
-
 	// Resource options
 	options := []rs.ResourceOption{
 		rs.WithParentResourceID(parentID),
 		rs.WithDescription(fmt.Sprintf("Secret of type %s in namespace %s", secret.Type, secret.Namespace)),
+		rs.WithResourceCreatedAt(secret.CreationTimestamp.Time),
+		rs.WithResourceProfile(profile),
 	}
 
 	// Add external ID if available
@@ -154,7 +140,7 @@ func secretResource(secret *corev1.Secret) (*v2.Resource, error) {
 		secret.Name,
 		ResourceTypeSecret,
 		resourceID,
-		secretOptions,
+		nil,
 		options...,
 	)
 	if err != nil {

@@ -109,8 +109,9 @@ func roleResource(role *rbacv1.Role) (*v2.Resource, error) {
 		fmt.Sprintf("%s (%s)", role.Name, role.Namespace),
 		ResourceTypeRole,
 		rawID, // Pass the raw ID directly
-		[]rs.RoleTraitOption{rs.WithRoleProfile(profile)},
+		nil,
 		rs.WithParentResourceID(parentID),
+		rs.WithResourceProfile(profile),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create role resource: %w", err)

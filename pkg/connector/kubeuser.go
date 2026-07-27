@@ -302,8 +302,6 @@ func (k *kubeUserBuilder) kubeUserResource(username string) (*v2.Resource, error
 
 	// Create resource with user trait options
 	userOptions := []rs.UserTraitOption{
-		rs.WithStatus(v2.UserTrait_Status_STATUS_ENABLED),
-		rs.WithUserProfile(profile),
 		rs.WithUserLogin(username),
 	}
 
@@ -313,6 +311,8 @@ func (k *kubeUserBuilder) kubeUserResource(username string) (*v2.Resource, error
 		ResourceTypeKubeUser,
 		username,
 		userOptions,
+		rs.WithResourceStatus(v2.Status_RESOURCE_STATUS_ENABLED, ""),
+		rs.WithResourceProfile(profile),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create user resource: %w", err)

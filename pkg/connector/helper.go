@@ -9,7 +9,6 @@ import (
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/types/grant"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
-	"google.golang.org/protobuf/types/known/structpb"
 	rbacv1 "k8s.io/api/rbac/v1"
 )
 
@@ -67,36 +66,22 @@ func generateWildcardResource(resourceType *v2.ResourceType) (*v2.Resource, erro
 	switch resourceType.Id {
 	case ResourceTypeSecret.Id:
 		// For secrets, use NewSecretResource with SecretTrait.
-		secretOptions := []rs.SecretTraitOption{
-			// Set creation time to now
-			rs.WithSecretCreatedAt(time.Now()),
-			// Add profile to trait.
-			func(t *v2.SecretTrait) error {
-				profileStruct, err := structpb.NewStruct(profile)
-				if err != nil {
-					return err
-				}
-				t.Profile = profileStruct
-				return nil
-			},
-		}
-
 		options := []rs.ResourceOption{
 			rs.WithDescription("Represents all secrets in the cluster"),
+			rs.WithResourceCreatedAt(time.Now()),
+			rs.WithResourceProfile(profile),
 		}
 
 		return rs.NewSecretResource(
 			displayName,
 			resourceType,
 			resourceID,
-			secretOptions,
+			nil,
 			options...,
 		)
 	case ResourceTypeServiceAccount.Id:
 		// For service accounts, use NewUserResource with UserTrait.
 		userOptions := []rs.UserTraitOption{
-			rs.WithUserProfile(profile),
-			rs.WithStatus(v2.UserTrait_Status_STATUS_ENABLED),
 			rs.WithAccountType(v2.UserTrait_ACCOUNT_TYPE_SERVICE),
 		}
 
@@ -105,6 +90,8 @@ func generateWildcardResource(resourceType *v2.ResourceType) (*v2.Resource, erro
 			resourceType,
 			resourceID,
 			userOptions,
+			rs.WithResourceStatus(v2.Status_RESOURCE_STATUS_ENABLED, ""),
+			rs.WithResourceProfile(profile),
 		)
 	case ResourceTypeRole.Id, ResourceTypeClusterRole.Id:
 		// For roles, use NewRoleResource with RoleTrait.
@@ -112,7 +99,8 @@ func generateWildcardResource(resourceType *v2.ResourceType) (*v2.Resource, erro
 			displayName,
 			resourceType,
 			resourceID,
-			[]rs.RoleTraitOption{rs.WithRoleProfile(profile)},
+			nil,
+			rs.WithResourceProfile(profile),
 		)
 	default:
 		// For other resource types, use standard NewResource.
