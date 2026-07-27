@@ -30,13 +30,16 @@ const (
 	ResourceTypeRoleBinding         = "rolebinding"
 	SubjectTypeGroup                = "Group"
 	SubjectTypeUser                 = "User"
+	// RBACKindRole is the Kubernetes RBAC Kind value for Role objects; it also
+	// matches the connector's Role resource type DisplayName.
+	RBACKindRole = "Role"
 )
 
 // Resource type definitions.
 var (
-	ResourceTypeNamespace      = &v2.ResourceType{Id: "namespace", DisplayName: "Namespace"}
+	ResourceTypeNamespace      = &v2.ResourceType{Id: profileKeyNamespace, DisplayName: "Namespace"}
 	ResourceTypeServiceAccount = &v2.ResourceType{Id: "service_account", DisplayName: "Service Account", Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_USER}}
-	ResourceTypeRole           = &v2.ResourceType{Id: "role", DisplayName: "Role", Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_ROLE}}
+	ResourceTypeRole           = &v2.ResourceType{Id: "role", DisplayName: RBACKindRole, Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_ROLE}}
 	ResourceTypeClusterRole    = &v2.ResourceType{Id: "cluster_role", DisplayName: "Cluster Role", Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_ROLE}}
 	ResourceTypeSecret         = &v2.ResourceType{Id: "secret", DisplayName: "Secret", Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_SECRET}}
 	ResourceTypeConfigMap      = &v2.ResourceType{Id: "configmap", DisplayName: "Config Map"}
@@ -48,8 +51,8 @@ var (
 	ResourceTypeKubeUser       = &v2.ResourceType{Id: "kube_user", DisplayName: "Kubernetes User", Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_USER}}
 	ResourceTypeKubeGroup      = &v2.ResourceType{Id: "kube_group", DisplayName: "Kubernetes Group", Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_GROUP}}
 	ResourceTypeBinding        = &v2.ResourceType{Id: "binding", DisplayName: "Binding", Description: "Internal type for processing RBAC bindings"}
-	ResourceTypeUser           = &v2.ResourceType{Id: "user", DisplayName: "User", Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_USER}}
-	ResourceTypeGroup          = &v2.ResourceType{Id: "group", DisplayName: "Group", Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_GROUP}}
+	ResourceTypeUser           = &v2.ResourceType{Id: "user", DisplayName: SubjectTypeUser, Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_USER}}
+	ResourceTypeGroup          = &v2.ResourceType{Id: "group", DisplayName: SubjectTypeGroup, Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_GROUP}}
 )
 
 // Configuration options.
@@ -212,7 +215,7 @@ func NewFromConfig(ctx context.Context, cfg *pkgconfig.Kubernetes) (*Kubernetes,
 	// via flags because they expose verb entitlements that never produce grants,
 	// resulting in noisy partial resources in ConductorOne.
 	syncResources := []string{
-		"namespace",
+		profileKeyNamespace,
 		"service_account",
 		"role",
 		"cluster_role",
@@ -503,7 +506,7 @@ func (k *Kubernetes) GetMatchingRoleBindings(ctx context.Context, namespace, rol
 
 	var result []rbacv1.RoleBinding
 	for _, binding := range k.roleBindingsCache {
-		if binding.Namespace == namespace && binding.RoleRef.Kind == "Role" && binding.RoleRef.Name == roleName {
+		if binding.Namespace == namespace && binding.RoleRef.Kind == RBACKindRole && binding.RoleRef.Name == roleName {
 			result = append(result, binding)
 		}
 	}

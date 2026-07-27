@@ -83,7 +83,7 @@ func (k *kubeUserBuilder) List(ctx context.Context, parentResourceID *v2.Resourc
 
 		for _, binding := range resp.Items {
 			for _, subject := range binding.Subjects {
-				if subject.Kind == "User" {
+				if subject.Kind == SubjectKindUser {
 					k.processUser(ctx, subject.Name, &rv)
 				}
 			}
@@ -121,7 +121,7 @@ func (k *kubeUserBuilder) List(ctx context.Context, parentResourceID *v2.Resourc
 
 		for _, binding := range resp.Items {
 			for _, subject := range binding.Subjects {
-				if subject.Kind == "User" {
+				if subject.Kind == SubjectKindUser {
 					k.processUser(ctx, subject.Name, &rv)
 				}
 			}
@@ -297,7 +297,7 @@ func (k *kubeUserBuilder) processUser(ctx context.Context, username string, reso
 func (k *kubeUserBuilder) kubeUserResource(username string) (*v2.Resource, error) {
 	// Create profile
 	profile := map[string]interface{}{
-		"name": username,
+		profileKeyName: username,
 	}
 
 	// Create resource with user trait options

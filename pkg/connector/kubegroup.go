@@ -88,7 +88,7 @@ func (k *kubeGroupBuilder) List(ctx context.Context, parentResourceID *v2.Resour
 
 		for _, binding := range resp.Items {
 			for _, subject := range binding.Subjects {
-				if subject.Kind == "Group" {
+				if subject.Kind == SubjectKindGroup {
 					k.processGroup(ctx, subject.Name, &rv)
 				}
 			}
@@ -126,7 +126,7 @@ func (k *kubeGroupBuilder) List(ctx context.Context, parentResourceID *v2.Resour
 
 		for _, binding := range resp.Items {
 			for _, subject := range binding.Subjects {
-				if subject.Kind == "Group" {
+				if subject.Kind == SubjectKindGroup {
 					k.processGroup(ctx, subject.Name, &rv)
 				}
 			}
@@ -178,7 +178,7 @@ func (k *kubeGroupBuilder) processGroup(ctx context.Context, groupName string, r
 func (k *kubeGroupBuilder) kubeGroupResource(groupName string) (*v2.Resource, error) {
 	// Create profile
 	profile := map[string]interface{}{
-		"name": groupName,
+		profileKeyName: groupName,
 	}
 
 	// Create resource with group trait options

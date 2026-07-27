@@ -18,9 +18,13 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
+// verbGet is the standard Kubernetes RBAC read verb, declared as a constant
+// because it also appears in test fixtures (satisfies goconst).
+const verbGet = "get"
+
 // Standard verb entitlements for Kubernetes resources.
 var standardResourceVerbs = []string{
-	"get",
+	verbGet,
 	"list",
 	"watch",
 	"create",
@@ -110,13 +114,13 @@ func secretResource(secret *corev1.Secret) (*v2.Resource, error) {
 
 	// Create profile with standard metadata
 	profile := map[string]interface{}{
-		"name":              secret.Name,
-		"namespace":         secret.Namespace,
-		"uid":               string(secret.UID),
-		"creationTimestamp": secret.CreationTimestamp.String(),
-		"labels":            StringMapToAnyMap(secret.Labels),
-		"annotations":       StringMapToAnyMap(secret.Annotations),
-		"type":              string(secret.Type),
+		profileKeyName:              secret.Name,
+		profileKeyNamespace:         secret.Namespace,
+		profileKeyUID:               string(secret.UID),
+		profileKeyCreationTimestamp: secret.CreationTimestamp.String(),
+		profileKeyLabels:            StringMapToAnyMap(secret.Labels),
+		profileKeyAnnotations:       StringMapToAnyMap(secret.Annotations),
+		"type":                      string(secret.Type),
 	}
 
 	// Secret trait options

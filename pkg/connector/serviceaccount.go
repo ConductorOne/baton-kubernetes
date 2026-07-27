@@ -92,12 +92,12 @@ func (s *serviceAccountBuilder) List(ctx context.Context, parentResourceID *v2.R
 func serviceAccountResource(serviceAccount *corev1.ServiceAccount) (*v2.Resource, error) {
 	// Prepare profile with standard metadata
 	profile := map[string]interface{}{
-		"name":              serviceAccount.Name,
-		"namespace":         serviceAccount.Namespace,
-		"uid":               string(serviceAccount.UID),
-		"creationTimestamp": serviceAccount.CreationTimestamp.String(),
-		"labels":            StringMapToAnyMap(serviceAccount.Labels),
-		"annotations":       StringMapToAnyMap(serviceAccount.Annotations),
+		profileKeyName:              serviceAccount.Name,
+		profileKeyNamespace:         serviceAccount.Namespace,
+		profileKeyUID:               string(serviceAccount.UID),
+		profileKeyCreationTimestamp: serviceAccount.CreationTimestamp.String(),
+		profileKeyLabels:            StringMapToAnyMap(serviceAccount.Labels),
+		profileKeyAnnotations:       StringMapToAnyMap(serviceAccount.Annotations),
 	}
 
 	// Add secrets if present

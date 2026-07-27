@@ -13,6 +13,17 @@ import (
 // ResourcesPageSize is the default page size for resource listings.
 const ResourcesPageSize = 500
 
+// Profile map keys shared across resource builders when populating trait
+// profiles from Kubernetes object metadata.
+const (
+	profileKeyName              = "name"
+	profileKeyNamespace         = "namespace"
+	profileKeyUID               = "uid"
+	profileKeyCreationTimestamp = "creationTimestamp"
+	profileKeyLabels            = "labels"
+	profileKeyAnnotations       = "annotations"
+)
+
 // ParsePageToken parses a page token into a pagination bag.
 func ParsePageToken(token string) (*pagination.Bag, error) {
 	bag := &pagination.Bag{}

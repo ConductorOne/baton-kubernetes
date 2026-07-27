@@ -88,11 +88,11 @@ func (c *clusterRoleBuilder) List(ctx context.Context, parentResourceID *v2.Reso
 func clusterRoleResource(clusterRole *rbacv1.ClusterRole) (*v2.Resource, error) {
 	// Prepare profile with standard metadata
 	profile := map[string]interface{}{
-		"name":              clusterRole.Name,
-		"uid":               string(clusterRole.UID),
-		"creationTimestamp": clusterRole.CreationTimestamp.String(),
-		"labels":            StringMapToAnyMap(clusterRole.Labels),
-		"annotations":       StringMapToAnyMap(clusterRole.Annotations),
+		profileKeyName:              clusterRole.Name,
+		profileKeyUID:               string(clusterRole.UID),
+		profileKeyCreationTimestamp: clusterRole.CreationTimestamp.String(),
+		profileKeyLabels:            StringMapToAnyMap(clusterRole.Labels),
+		profileKeyAnnotations:       StringMapToAnyMap(clusterRole.Annotations),
 	}
 
 	// Add aggregation rule if present
