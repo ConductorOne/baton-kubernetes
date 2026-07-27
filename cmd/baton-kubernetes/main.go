@@ -38,7 +38,7 @@ func main() {
 }
 
 func getConnector(ctx context.Context, cfg *pkgconfig.Kubernetes) (types.ConnectorServer, error) {
-	k, err := connector.New(ctx, cfg)
+	k, err := connector.NewFromConfig(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}

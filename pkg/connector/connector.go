@@ -108,10 +108,11 @@ type Kubernetes struct {
 	secretsMu          sync.RWMutex
 }
 
-// New creates a Kubernetes connector from the typed configuration struct.
+// NewFromConfig creates a Kubernetes connector from the typed configuration struct.
 // It validates kubeconfig paths, builds a REST config, and assembles the
-// list of resource types to sync.
-func New(ctx context.Context, cfg *pkgconfig.Kubernetes) (*Kubernetes, error) {
+// list of resource types to sync. This is the constructor used by the
+// standalone baton-kubernetes CLI.
+func NewFromConfig(ctx context.Context, cfg *pkgconfig.Kubernetes) (*Kubernetes, error) {
 	opt := clioptions.NewConfigFlags(true)
 
 	// --- Kubeconfig source resolution ---
@@ -233,12 +234,15 @@ func New(ctx context.Context, cfg *pkgconfig.Kubernetes) (*Kubernetes, error) {
 		}
 	}
 
-	return newFromRESTConfig(ctx, restConfig, WithSyncResources(syncResources))
+	return New(ctx, restConfig, WithSyncResources(syncResources))
 }
 
-// newFromRESTConfig creates a Kubernetes connector from a pre-built REST config.
-// Used internally by New and by tests that construct their own REST configs.
-func newFromRESTConfig(ctx context.Context, cfg *rest.Config, opts ...ConnectorOption) (*Kubernetes, error) {
+// New creates a Kubernetes connector from a pre-built REST config.
+// This is the library entry point consumed by downstream connectors
+// (baton-eks, baton-aks, baton-gke), which build their own REST configs
+// with cloud-specific authentication — its signature must remain stable.
+// The standalone CLI goes through NewFromConfig instead.
+func New(ctx context.Context, cfg *rest.Config, opts ...ConnectorOption) (*Kubernetes, error) {
 	// Validate that config is not nil
 	if cfg == nil {
 		return nil, fmt.Errorf("kubernetes REST config cannot be nil")
