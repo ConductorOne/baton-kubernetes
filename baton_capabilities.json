@@ -11,7 +11,8 @@
       },
       "capabilities": [
         "CAPABILITY_SYNC"
-      ]
+      ],
+      "permissions": {}
     },
     {
       "resourceType": {
@@ -23,7 +24,8 @@
       },
       "capabilities": [
         "CAPABILITY_SYNC"
-      ]
+      ],
+      "permissions": {}
     },
     {
       "resourceType": {
@@ -35,7 +37,8 @@
       },
       "capabilities": [
         "CAPABILITY_SYNC"
-      ]
+      ],
+      "permissions": {}
     },
     {
       "resourceType": {
@@ -44,7 +47,8 @@
       },
       "capabilities": [
         "CAPABILITY_SYNC"
-      ]
+      ],
+      "permissions": {}
     },
     {
       "resourceType": {
@@ -56,7 +60,8 @@
       },
       "capabilities": [
         "CAPABILITY_SYNC"
-      ]
+      ],
+      "permissions": {}
     },
     {
       "resourceType": {
@@ -68,7 +73,8 @@
       },
       "capabilities": [
         "CAPABILITY_SYNC"
-      ]
+      ],
+      "permissions": {}
     }
   ],
   "connectorCapabilities": [
