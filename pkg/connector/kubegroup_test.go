@@ -120,10 +120,11 @@ func TestKubeGroupBuilderGrantsMultipleMembers(t *testing.T) {
 	assert.True(t, principals["bob"])
 }
 
-// TestKubeGroupBuilderGrantsErrorIfCacheNotSealed verifies that Grants() returns an
-// error when called before kubeUserBuilder Phase 3 has completed.
-// This should not happen in practice (SDK guarantees List before Grants).
-func TestKubeGroupBuilderGrantsErrorIfCacheNotSealed(t *testing.T) {
+// TestKubeGroupBuilderGrantsNoCacheSealed verifies that Grants() degrades to
+// emitting no grants when the secrets scan never ran — e.g. kube_group is synced
+// without kube_user via a custom sync selection. Membership is best-effort data
+// and must not fail the sync.
+func TestKubeGroupBuilderGrantsNoCacheSealed(t *testing.T) {
 	k8s := &Kubernetes{client: fake.NewSimpleClientset()} // secretsResult is nil
 	builder := newKubeGroupBuilder(fake.NewSimpleClientset(), k8s)
 
@@ -135,7 +136,8 @@ func TestKubeGroupBuilderGrantsErrorIfCacheNotSealed(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	_, _, _, err := builder.Grants(ctx, groupResource, &pagination.Token{})
+	grants, _, _, err := builder.Grants(ctx, groupResource, &pagination.Token{})
 
-	require.Error(t, err, "Grants() must return an error when the cache is not yet sealed")
+	require.NoError(t, err, "Grants() must not fail when the secrets scan never ran")
+	assert.Empty(t, grants, "no membership data means no grants")
 }

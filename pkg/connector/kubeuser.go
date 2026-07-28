@@ -154,26 +154,37 @@ func (k *kubeUserBuilder) List(ctx context.Context, parentResourceID *v2.Resourc
 			Continue: continueToken,
 		}
 
-		// Initialize the accumulator on the first Phase 3 page (empty continue token).
-		if continueToken == "" {
-			k.k8s.secretsMu.Lock()
+		// Initialize the accumulator if needed. This is not gated on the continue
+		// token being empty: a resumed sync can enter Phase 3 mid-pagination in a
+		// fresh process, where the accumulator has not been created yet.
+		k.k8s.secretsMu.Lock()
+		if k.k8s.secretsAccumulator == nil {
 			k.k8s.secretsAccumulator = &secretsScanResult{
 				GroupMembers: make(map[string][]string),
 			}
-			k.k8s.secretsMu.Unlock()
 		}
+		k.k8s.secretsMu.Unlock()
 
 		l.Debug("fetching secrets page", zap.String("continue_token", continueToken))
 		resp, err := k.client.CoreV1().Secrets("").List(ctx, opts)
 		if err != nil {
-			return nil, "", nil, fmt.Errorf("failed to list secrets: %w", err)
+			// Phase 3 is a best-effort x509 discovery pass. Listing secrets
+			// cluster-wide is a privilege many read-only service accounts
+			// deliberately lack; that must not fail the mandatory user sync.
+			// Seal whatever has been accumulated so kubeGroupBuilder.Grants
+			// still has a (possibly empty) result to read.
+			l.Warn("skipping cert-based user discovery: cannot list secrets", zap.Error(err))
+			k.k8s.secretsMu.Lock()
+			k.k8s.secretsResult = k.k8s.secretsAccumulator
+			k.k8s.secretsAccumulator = nil
+			k.k8s.secretsMu.Unlock()
+			return rv, "", nil, nil
 		}
 
 		// certEntry holds parsed data from one kubeconfig auth entry.
 		type certEntry struct {
-			cn            string   // x509 CN; non-empty entries go into Usernames
-			principalName string   // cn or kubeconfig username fallback; goes into GroupMembers
-			orgs          []string // x509 Organization fields (group names)
+			cn   string   // x509 CN; the principal identity
+			orgs []string // x509 Organization fields (group names)
 		}
 
 		// Parse certs outside the lock (CPU-bound).
@@ -194,18 +205,17 @@ func (k *kubeUserBuilder) List(ctx context.Context, parentResourceID *v2.Resourc
 					}
 					cert := certs[0]
 					cn := cert.Subject.CommonName
-					// Preserve original Grants() fallback: use kubeconfig key when CN is empty.
-					principalName := cn
-					if principalName == "" {
-						principalName = username
-					}
-					if principalName == "" {
+					if cn == "" {
+						// The CN is the identity Kubernetes authenticates; a kubeconfig
+						// auth-info key is an arbitrary local label, and using it as a
+						// fallback would emit membership grants for a principal that is
+						// never synced as a resource.
+						l.Debug("skipping client certificate without CommonName", zap.String("auth_info", username))
 						continue
 					}
 					entries = append(entries, certEntry{
-						cn:            cn,
-						principalName: principalName,
-						orgs:          cert.Subject.Organization,
+						cn:   cn,
+						orgs: cert.Subject.Organization,
 					})
 				}
 			}
@@ -216,12 +226,14 @@ func (k *kubeUserBuilder) List(ctx context.Context, parentResourceID *v2.Resourc
 		k.k8s.secretsMu.Lock()
 		acc := k.k8s.secretsAccumulator
 		for _, e := range entries {
-			if e.cn != "" && !containsString(acc.Usernames, e.cn) {
+			if !containsString(acc.Usernames, e.cn) {
 				acc.Usernames = append(acc.Usernames, e.cn)
 				newCNs = append(newCNs, e.cn)
 			}
 			for _, org := range e.orgs {
-				acc.GroupMembers[org] = append(acc.GroupMembers[org], e.principalName)
+				if !containsString(acc.GroupMembers[org], e.cn) {
+					acc.GroupMembers[org] = append(acc.GroupMembers[org], e.cn)
+				}
 			}
 		}
 		k.k8s.secretsMu.Unlock()

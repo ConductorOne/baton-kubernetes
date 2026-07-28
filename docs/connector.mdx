@@ -20,13 +20,17 @@ This connector requires network access to your Kubernetes API server. If your cl
 | Kubernetes groups | <Icon icon="square-check" iconType="solid" color="#c937ae"/> | |
 | Roles | <Icon icon="square-check" iconType="solid" color="#c937ae"/> | |
 | Cluster roles | <Icon icon="square-check" iconType="solid" color="#c937ae"/> | |
-| Nodes | <Icon icon="square-check" iconType="solid" color="#c937ae"/> | |
-| Pods | <Icon icon="square-check" iconType="solid" color="#c937ae"/> | |
-| Deployments | <Icon icon="square-check" iconType="solid" color="#c937ae"/> | |
-| StatefulSets | <Icon icon="square-check" iconType="solid" color="#c937ae"/> | |
-| DaemonSets | <Icon icon="square-check" iconType="solid" color="#c937ae"/> | |
-| Secrets | <Icon icon="square-check" iconType="solid" color="#c937ae"/> | |
-| ConfigMaps | <Icon icon="square-check" iconType="solid" color="#c937ae"/> | |
+| Nodes | Opt-in (`--sync-nodes`) | |
+| Pods | Opt-in (`--sync-pods`) | |
+| Deployments | Opt-in (`--sync-deployments`) | |
+| StatefulSets | Opt-in (`--sync-stateful-sets`) | |
+| DaemonSets | Opt-in (`--sync-daemon-sets`) | |
+| Secrets | Opt-in (`--sync-secrets`) | |
+| ConfigMaps | Opt-in (`--sync-config-maps`) | |
+
+<Note>
+Workload and configuration resource types (Nodes, Pods, Deployments, StatefulSets, DaemonSets, Secrets, ConfigMaps) are excluded from the default sync and can be enabled individually with the CLI flags shown above.
+</Note>
 
 ## Understanding Kubernetes identity
 

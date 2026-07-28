@@ -217,13 +217,18 @@ func (k *kubeGroupBuilder) Entitlements(_ context.Context, resource *v2.Resource
 // Grants returns group membership grants from the sealed secrets cache.
 // The cache is populated by kubeUserBuilder.List() Phase 3.
 // The SDK guarantees all List() calls complete before Grants() is invoked.
-func (k *kubeGroupBuilder) Grants(_ context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
+func (k *kubeGroupBuilder) Grants(ctx context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
 	k.k8s.secretsMu.RLock()
 	result := k.k8s.secretsResult
 	k.k8s.secretsMu.RUnlock()
 
 	if result == nil {
-		return nil, "", nil, fmt.Errorf("baton-kubernetes: secrets cache not sealed; kubeUserBuilder must complete before kubeGroupBuilder.Grants")
+		// The x509 discovery pass never ran — kube_group is being synced without
+		// kube_user (custom sync selection). Membership is best-effort data;
+		// return no grants rather than failing the sync.
+		ctxzap.Extract(ctx).Debug("no secrets scan result; emitting no group membership grants",
+			zap.String("group", resource.Id.Resource))
+		return nil, "", nil, nil
 	}
 
 	principals := result.GroupMembers[resource.Id.Resource]

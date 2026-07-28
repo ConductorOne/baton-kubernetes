@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"fmt"
 	"math/big"
 	"testing"
 	"time"
@@ -17,8 +18,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 	clientcmd "k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 )
@@ -102,10 +107,11 @@ func makeKubeconfigSecretWithEmptyCN(t *testing.T, name, namespace string, orgs 
 	}
 }
 
-// TestKubeUserBuilderPhase3EmptyCNFallback verifies that a cert with an empty CN:
-// - does NOT produce a user resource (empty CN excluded from Usernames)
-// - DOES populate GroupMembers using the kubeconfig auth-info key as principalName.
-func TestKubeUserBuilderPhase3EmptyCNFallback(t *testing.T) {
+// TestKubeUserBuilderPhase3EmptyCNSkipped verifies that a cert with an empty CN
+// is skipped entirely: no user resource and no group membership. The CN is the
+// identity Kubernetes authenticates; the kubeconfig auth-info key is an arbitrary
+// local label, and membership grants for it would dangle (no matching resource).
+func TestKubeUserBuilderPhase3EmptyCNSkipped(t *testing.T) {
 	secret := makeKubeconfigSecretWithEmptyCN(t, "kc-empty-cn", "default", []string{"ops-team"})
 	fakeClient := fake.NewSimpleClientset(secret)
 
@@ -127,8 +133,8 @@ func TestKubeUserBuilderPhase3EmptyCNFallback(t *testing.T) {
 	k8s.secretsMu.Unlock()
 	require.NotNil(t, result)
 	assert.Empty(t, result.Usernames, "empty CN must not be added to Usernames")
-	assert.Equal(t, []string{"service-account-1"}, result.GroupMembers["ops-team"],
-		"kubeconfig username key must be used as principalName when CN is empty")
+	assert.Empty(t, result.GroupMembers["ops-team"],
+		"empty CN must not produce group membership entries")
 }
 
 // TestKubeUserBuilderPhase3MultiPageAccumulates verifies that Phase 3 correctly merges
@@ -199,4 +205,36 @@ func TestKubeUserBuilderPhase3DeduplicatesUsers(t *testing.T) {
 	result := k8s.secretsResult
 	k8s.secretsMu.Unlock()
 	assert.Len(t, result.Usernames, 1)
+}
+
+// TestKubeUserBuilderPhase3SecretsListForbidden verifies that Phase 3 is
+// best-effort: when the connector's credentials cannot list secrets, the
+// mandatory kube_user sync must complete without error and the secrets
+// result must still be sealed (empty) so kubeGroupBuilder.Grants can run.
+func TestKubeUserBuilderPhase3SecretsListForbidden(t *testing.T) {
+	fakeClient := fake.NewSimpleClientset()
+	fakeClient.PrependReactor("list", "secrets", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, k8serrors.NewForbidden(
+			schema.GroupResource{Resource: "secrets"}, "", fmt.Errorf("no cluster-wide secret access"))
+	})
+
+	k8s := &Kubernetes{client: fakeClient}
+	builder := newKubeUserBuilder(fakeClient, k8s)
+
+	phaseToken, err := marshalPhaseToken(phaseSecrets, "")
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	resources, nextToken, _, err := builder.List(ctx, nil, &pagination.Token{Token: phaseToken})
+
+	require.NoError(t, err, "a forbidden secrets list must not fail the user sync")
+	assert.Empty(t, nextToken, "sync must complete cleanly")
+	assert.Empty(t, resources)
+
+	k8s.secretsMu.Lock()
+	result := k8s.secretsResult
+	k8s.secretsMu.Unlock()
+	require.NotNil(t, result, "secrets result must be sealed even on failure")
+	assert.Empty(t, result.Usernames)
+	assert.Empty(t, result.GroupMembers)
 }
