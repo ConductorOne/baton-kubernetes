@@ -204,6 +204,11 @@ func (c *clusterRoleBuilder) Grants(ctx context.Context, resource *v2.Resource, 
 		namespace := binding.Namespace
 		// Process each subject in the binding
 		for _, subject := range binding.Subjects {
+			// A ServiceAccount subject may omit its namespace, in which case
+			// Kubernetes resolves it to the binding's namespace.
+			if subject.Kind == SubjectKindServiceAccount && subject.Namespace == "" {
+				subject.Namespace = binding.Namespace
+			}
 			entName := fmt.Sprintf("%s:%s", namespace, "member")
 			subjectGrant, err := GrantRoleToSubject(subject, resource, entName)
 			if err != nil {

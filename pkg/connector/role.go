@@ -182,6 +182,11 @@ func (r *roleBuilder) Grants(ctx context.Context, resource *v2.Resource, _ *pagi
 	for _, binding := range matchingBindings {
 		// Process each subject in the binding
 		for _, subject := range binding.Subjects {
+			// A ServiceAccount subject may omit its namespace, in which case
+			// Kubernetes resolves it to the binding's namespace.
+			if subject.Kind == SubjectKindServiceAccount && subject.Namespace == "" {
+				subject.Namespace = binding.Namespace
+			}
 			subjectGrant, err := GrantRoleToSubject(subject, resource, "member")
 			if err != nil {
 				l.Debug("subject kind not supported", zap.String("subject kind", subject.Kind))

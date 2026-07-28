@@ -221,3 +221,60 @@ func TestRoleBuilderGrants_WithBindings(t *testing.T) {
 	assert.Equal(t, 1, userGrants, "Should have 1 grants for user alice")
 	assert.Equal(t, 1, saGrants, "Should have 3 grants for service account system")
 }
+
+// TestRoleBuilderGrants_ServiceAccountSubjectWithoutNamespace verifies that a
+// ServiceAccount subject with an empty namespace resolves to the binding's
+// namespace, matching Kubernetes semantics. Without this, the grant principal
+// would be "/name" and dangle as a missing resource.
+func TestRoleBuilderGrants_ServiceAccountSubjectWithoutNamespace(t *testing.T) {
+	role := &rbacv1.Role{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pod-reader",
+			Namespace: "app-ns",
+			UID:       "test-uid",
+		},
+	}
+
+	saBinding := rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "runner-binding",
+			Namespace: "app-ns",
+		},
+		RoleRef: rbacv1.RoleRef{
+			Kind:     "Role",
+			Name:     "pod-reader",
+			APIGroup: "rbac.authorization.k8s.io",
+		},
+		Subjects: []rbacv1.Subject{
+			{
+				Kind: "ServiceAccount",
+				Name: "runner",
+				// Namespace intentionally empty: Kubernetes resolves it to the
+				// binding's namespace.
+			},
+		},
+	}
+
+	fakeClient := fake.NewSimpleClientset(role)
+	mockBindingProvider := newMockRoleBindingProvider()
+	mockBindingProvider.addMockBinding("app-ns", "pod-reader", saBinding)
+
+	builder := &roleBuilder{
+		client:          fakeClient,
+		bindingProvider: mockBindingProvider,
+	}
+
+	testResource := &v2.Resource{
+		Id: &v2.ResourceId{
+			ResourceType: ResourceTypeRole.Id,
+			Resource:     "app-ns/pod-reader",
+		},
+		DisplayName: "pod-reader",
+	}
+
+	grants, _, _, err := builder.Grants(context.Background(), testResource, &pagination.Token{})
+	require.NoError(t, err)
+	require.Len(t, grants, 1)
+	assert.Equal(t, ResourceTypeServiceAccount.Id, grants[0].Principal.Id.ResourceType)
+	assert.Equal(t, "app-ns/runner", grants[0].Principal.Id.Resource)
+}
