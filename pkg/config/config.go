@@ -145,36 +145,43 @@ var (
 		FlagSyncConfigMaps,
 		field.WithDescription("Sync ConfigMap resources (disabled by default)"),
 		field.WithDefaultValue(false),
+		field.WithExportTarget(field.ExportTargetCLIOnly),
 	)
 	syncSecretsField = field.BoolField(
 		FlagSyncSecrets,
 		field.WithDescription("Sync Secret resources (disabled by default)"),
 		field.WithDefaultValue(false),
+		field.WithExportTarget(field.ExportTargetCLIOnly),
 	)
 	syncPodsField = field.BoolField(
 		FlagSyncPods,
 		field.WithDescription("Sync Pod resources (disabled by default)"),
 		field.WithDefaultValue(false),
+		field.WithExportTarget(field.ExportTargetCLIOnly),
 	)
 	syncNodesField = field.BoolField(
 		FlagSyncNodes,
 		field.WithDescription("Sync Node resources (disabled by default)"),
 		field.WithDefaultValue(false),
+		field.WithExportTarget(field.ExportTargetCLIOnly),
 	)
 	syncDeploymentsField = field.BoolField(
 		FlagSyncDeployments,
 		field.WithDescription("Sync Deployment resources (disabled by default)"),
 		field.WithDefaultValue(false),
+		field.WithExportTarget(field.ExportTargetCLIOnly),
 	)
 	syncStatefulSetsField = field.BoolField(
 		FlagSyncStatefulSets,
 		field.WithDescription("Sync StatefulSet resources (disabled by default)"),
 		field.WithDefaultValue(false),
+		field.WithExportTarget(field.ExportTargetCLIOnly),
 	)
 	syncDaemonSetsField = field.BoolField(
 		FlagSyncDaemonSets,
 		field.WithDescription("Sync DaemonSet resources (disabled by default)"),
 		field.WithDefaultValue(false),
+		field.WithExportTarget(field.ExportTargetCLIOnly),
 	)
 )
 
