@@ -80,7 +80,7 @@ func (k *kubeGroupBuilder) List(ctx context.Context, parentResourceID *v2.Resour
 		// Extract group subjects from bindings
 		for _, binding := range resp.Items {
 			for _, subject := range binding.Subjects {
-				if subject.Kind == "Group" {
+				if subject.Kind == SubjectKindGroup {
 					// Process group
 					k.processGroup(ctx, subject.Name, &rv)
 				}
@@ -99,11 +99,11 @@ func (k *kubeGroupBuilder) List(ctx context.Context, parentResourceID *v2.Resour
 
 		// Prepare for phase 2
 		bag = &pagination.Bag{}
-		bag.Push(pagination.PageState{Token: "clusterrolebindings"})
+		bag.Push(pagination.PageState{Token: ResourceTypeClusterRoleBindings})
 	}
 
 	// Phase 2: Process ClusterRoleBindings
-	if pageState == "clusterrolebindings" {
+	if pageState == ResourceTypeClusterRoleBindings {
 		// Set up list options with pagination
 		opts := metav1.ListOptions{
 			Limit:    ResourcesPageSize,
@@ -120,7 +120,7 @@ func (k *kubeGroupBuilder) List(ctx context.Context, parentResourceID *v2.Resour
 		// Extract group subjects from bindings
 		for _, binding := range resp.Items {
 			for _, subject := range binding.Subjects {
-				if subject.Kind == "Group" {
+				if subject.Kind == SubjectKindGroup {
 					// Process group
 					k.processGroup(ctx, subject.Name, &rv)
 				}
@@ -174,7 +174,7 @@ func (k *kubeGroupBuilder) processGroup(ctx context.Context, groupName string, r
 func (k *kubeGroupBuilder) kubeGroupResource(groupName string) (*v2.Resource, error) {
 	// Create profile
 	profile := map[string]interface{}{
-		"name": groupName,
+		metadataKeyName: groupName,
 	}
 
 	// Create resource with group trait options

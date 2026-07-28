@@ -3,6 +3,7 @@ package connector
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -20,7 +21,7 @@ import (
 
 // Standard verb entitlements for Kubernetes resources.
 var standardResourceVerbs = []string{
-	"get",
+	verbGet,
 	"list",
 	"watch",
 	"create",
@@ -110,19 +111,25 @@ func secretResource(secret *corev1.Secret) (*v2.Resource, error) {
 
 	// Create profile with standard metadata
 	profile := map[string]interface{}{
-		"name":              secret.Name,
-		"namespace":         secret.Namespace,
-		"uid":               string(secret.UID),
-		"creationTimestamp": secret.CreationTimestamp.String(),
-		"labels":            StringMapToAnyMap(secret.Labels),
-		"annotations":       StringMapToAnyMap(secret.Annotations),
-		"type":              string(secret.Type),
+		metadataKeyName:              secret.Name,
+		metadataKeyNamespace:         secret.Namespace,
+		metadataKeyUID:               string(secret.UID),
+		metadataKeyCreationTimestamp: secret.CreationTimestamp.String(),
+		metadataKeyLabels:            StringMapToAnyMap(secret.Labels),
+		metadataKeyAnnotations:       StringMapToAnyMap(secret.Annotations),
+		"type":                       string(secret.Type),
 	}
+
+	// Classify the secret's cryptographic kind onto the NHI spine.
+	credentialType, credentialDetail := secretCredentialType(secret.Type)
 
 	// Secret trait options
 	secretOptions := []rs.SecretTraitOption{
 		// Set creation time from metadata
 		rs.WithSecretCreatedAt(secret.CreationTimestamp.Time),
+		// NHI spine: cryptographic class + platform-specific detail
+		rs.WithSecretType(credentialType),
+		rs.WithSecretDetail(credentialDetail),
 		// Create a custom trait option for the profile
 		func(t *v2.SecretTrait) error {
 			profileStruct, err := structpb.NewStruct(profile)
@@ -158,6 +165,39 @@ func secretResource(secret *corev1.Secret) (*v2.Resource, error) {
 	}
 
 	return resource, nil
+}
+
+// secretCredentialType maps a Kubernetes secret type onto the NHI spine
+// CredentialType and a dotted-lowercase axis-2 detail (e.g.
+// "k8s.secret.service_account_token"). TLS secrets carry an x509 certificate
+// and SSH-auth secrets carry an asymmetric key pair; everything else (opaque,
+// service-account tokens, docker creds, basic-auth, bootstrap tokens) is an
+// opaque static secret.
+func secretCredentialType(secretType corev1.SecretType) (v2.SecretTrait_CredentialType, string) {
+	detail := "k8s.secret." + normalizeSecretType(secretType)
+	switch secretType {
+	case corev1.SecretTypeTLS:
+		return v2.SecretTrait_CREDENTIAL_TYPE_CERTIFICATE, detail
+	case corev1.SecretTypeSSHAuth:
+		return v2.SecretTrait_CREDENTIAL_TYPE_ASYMMETRIC_KEY, detail
+	default:
+		return v2.SecretTrait_CREDENTIAL_TYPE_STATIC_SECRET, detail
+	}
+}
+
+// normalizeSecretType reduces a Kubernetes secret type to a dotted-lowercase
+// token: it drops any "<domain>/" prefix, lowercases, and replaces "-" with
+// "_" (e.g. "kubernetes.io/service-account-token" -> "service_account_token").
+// An empty type defaults to Opaque, matching Kubernetes semantics.
+func normalizeSecretType(secretType corev1.SecretType) string {
+	s := string(secretType)
+	if s == "" {
+		s = string(corev1.SecretTypeOpaque)
+	}
+	if idx := strings.LastIndex(s, "/"); idx >= 0 {
+		s = s[idx+1:]
+	}
+	return strings.ReplaceAll(strings.ToLower(s), "-", "_")
 }
 
 // Entitlements returns standard verb entitlements for Secret resources.

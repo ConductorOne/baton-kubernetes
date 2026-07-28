@@ -81,18 +81,18 @@ func (r *roleBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId,
 func roleResource(role *rbacv1.Role) (*v2.Resource, error) {
 	// Prepare profile with standard metadata
 	profile := map[string]interface{}{
-		"name":              role.Name,
-		"namespace":         role.Namespace,
-		"uid":               string(role.UID),
-		"creationTimestamp": role.CreationTimestamp.String(),
+		metadataKeyName:              role.Name,
+		metadataKeyNamespace:         role.Namespace,
+		metadataKeyUID:               string(role.UID),
+		metadataKeyCreationTimestamp: role.CreationTimestamp.String(),
 	}
 
 	// Only add labels and annotations if they're not nil to avoid proto conversion issues
 	if role.Labels != nil {
-		profile["labels"] = StringMapToAnyMap(role.Labels)
+		profile[metadataKeyLabels] = StringMapToAnyMap(role.Labels)
 	}
 	if role.Annotations != nil {
-		profile["annotations"] = StringMapToAnyMap(role.Annotations)
+		profile[metadataKeyAnnotations] = StringMapToAnyMap(role.Annotations)
 	}
 
 	// Get parent namespace resource ID
