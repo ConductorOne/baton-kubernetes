@@ -3,10 +3,13 @@ package connector
 import (
 	"context"
 	"fmt"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
 
 	rbacv1 "k8s.io/api/rbac/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
@@ -14,6 +17,7 @@ import (
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
 	"github.com/conductorone/baton-sdk/pkg/types/entitlement"
+	sdkGrant "github.com/conductorone/baton-sdk/pkg/types/grant"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"go.uber.org/zap"
@@ -250,6 +254,281 @@ func (c *clusterRoleBuilder) cacheNamespaces(ctx context.Context) error {
 	c.cachedNamespaces = names
 	c.nsCacheExpiry = now.Add(namespaceCacheTTL)
 	return nil
+}
+
+var k8sNameRegexp = regexp.MustCompile(`[^a-z0-9-]`)
+
+const (
+	maxK8sNameLen = 253
+	batonLabel    = "app.kubernetes.io/managed-by"
+	batonLabelVal = "baton-kubernetes"
+)
+
+func sanitizeK8sName(s string) string {
+	s = strings.ToLower(s)
+	s = k8sNameRegexp.ReplaceAllString(s, "-")
+	s = strings.Trim(s, "-")
+	if len(s) > maxK8sNameLen {
+		s = s[:maxK8sNameLen]
+	}
+	return s
+}
+
+func bindingName(clusterRole, subjectKind, subjectName string) string {
+	return sanitizeK8sName(fmt.Sprintf("baton-%s-%s-%s", clusterRole, subjectKind, subjectName))
+}
+
+func principalToK8sSubject(principal *v2.Resource) (rbacv1.Subject, error) {
+	switch principal.GetId().GetResourceType() {
+	case ResourceTypeKubeUser.Id:
+		return rbacv1.Subject{
+			Kind:     SubjectKindUser,
+			Name:     principal.GetId().GetResource(),
+			APIGroup: RBACAPIGroup,
+		}, nil
+	case ResourceTypeKubeGroup.Id:
+		return rbacv1.Subject{
+			Kind:     SubjectKindGroup,
+			Name:     principal.GetId().GetResource(),
+			APIGroup: RBACAPIGroup,
+		}, nil
+	case ResourceTypeServiceAccount.Id:
+		parts := strings.SplitN(principal.GetId().GetResource(), "/", 2)
+		if len(parts) != 2 {
+			return rbacv1.Subject{}, fmt.Errorf("baton-kubernetes: invalid service account ID %q, expected namespace/name", principal.GetId().GetResource())
+		}
+		return rbacv1.Subject{
+			Kind:      SubjectKindServiceAccount,
+			Name:      parts[1],
+			Namespace: parts[0],
+		}, nil
+	default:
+		return rbacv1.Subject{}, fmt.Errorf("baton-kubernetes: unsupported principal type %q", principal.GetId().GetResourceType())
+	}
+}
+
+// Grant creates a ClusterRoleBinding (cluster-scoped) or RoleBinding (namespace-scoped)
+// to bind the principal to the ClusterRole.
+func (c *clusterRoleBuilder) Grant(ctx context.Context, principal *v2.Resource, ent *v2.Entitlement) ([]*v2.Grant, annotations.Annotations, error) {
+	l := ctxzap.Extract(ctx)
+
+	clusterRoleName := ent.GetResource().GetId().GetResource()
+	slug := ent.GetSlug()
+
+	subject, err := principalToK8sSubject(principal)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	l.Info("granting cluster role",
+		zap.String("cluster_role", clusterRoleName),
+		zap.String("slug", slug),
+		zap.String("subject_kind", subject.Kind),
+		zap.String("subject_name", subject.Name),
+	)
+
+	labels := map[string]string{
+		batonLabel: batonLabelVal,
+	}
+
+	if slug == clusterScopedMember {
+		name := bindingName(clusterRoleName, subject.Kind, subject.Name)
+		binding := &rbacv1.ClusterRoleBinding{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:   name,
+				Labels: labels,
+			},
+			RoleRef: rbacv1.RoleRef{
+				APIGroup: RBACAPIGroup,
+				Kind:     RoleRefKindClusterRole,
+				Name:     clusterRoleName,
+			},
+			Subjects: []rbacv1.Subject{subject},
+		}
+
+		_, err := c.client.RbacV1().ClusterRoleBindings().Create(ctx, binding, metav1.CreateOptions{})
+		if err != nil {
+			if k8serrors.IsAlreadyExists(err) {
+				g := sdkGrant.NewGrant(ent.GetResource(), slug, principal.GetId())
+				return []*v2.Grant{g}, nil, nil
+			}
+			return nil, nil, fmt.Errorf("baton-kubernetes: failed to create cluster role binding: %w", err)
+		}
+	} else {
+		parts := strings.SplitN(slug, ":", 2)
+		if len(parts) != 2 {
+			return nil, nil, fmt.Errorf("baton-kubernetes: invalid entitlement slug %q", slug)
+		}
+		namespace := parts[0]
+
+		name := bindingName(clusterRoleName, subject.Kind, subject.Name)
+		binding := &rbacv1.RoleBinding{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
+				Namespace: namespace,
+				Labels:    labels,
+			},
+			RoleRef: rbacv1.RoleRef{
+				APIGroup: RBACAPIGroup,
+				Kind:     RoleRefKindClusterRole,
+				Name:     clusterRoleName,
+			},
+			Subjects: []rbacv1.Subject{subject},
+		}
+
+		_, err := c.client.RbacV1().RoleBindings(namespace).Create(ctx, binding, metav1.CreateOptions{})
+		if err != nil {
+			if k8serrors.IsAlreadyExists(err) {
+				g := sdkGrant.NewGrant(ent.GetResource(), slug, principal.GetId())
+				return []*v2.Grant{g}, nil, nil
+			}
+			return nil, nil, fmt.Errorf("baton-kubernetes: failed to create role binding in namespace %s: %w", namespace, err)
+		}
+	}
+
+	g := sdkGrant.NewGrant(ent.GetResource(), slug, principal.GetId())
+	return []*v2.Grant{g}, nil, nil
+}
+
+// Revoke removes the principal's binding to the ClusterRole.
+// It first tries to delete a baton-managed binding by deterministic name.
+// If not found, it searches all bindings for the role and removes the subject.
+func (c *clusterRoleBuilder) Revoke(ctx context.Context, grantObj *v2.Grant) (annotations.Annotations, error) {
+	l := ctxzap.Extract(ctx)
+
+	clusterRoleName := grantObj.GetEntitlement().GetResource().GetId().GetResource()
+	slug := grantObj.GetEntitlement().GetSlug()
+
+	subject, err := principalToK8sSubject(grantObj.GetPrincipal())
+	if err != nil {
+		return nil, err
+	}
+
+	l.Info("revoking cluster role",
+		zap.String("cluster_role", clusterRoleName),
+		zap.String("slug", slug),
+		zap.String("subject_kind", subject.Kind),
+		zap.String("subject_name", subject.Name),
+	)
+
+	if slug == clusterScopedMember {
+		return c.revokeClusterScoped(ctx, clusterRoleName, subject)
+	}
+
+	parts := strings.SplitN(slug, ":", 2)
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("baton-kubernetes: invalid entitlement slug %q", slug)
+	}
+	return c.revokeNamespaceScoped(ctx, clusterRoleName, parts[0], subject)
+}
+
+func (c *clusterRoleBuilder) revokeClusterScoped(ctx context.Context, clusterRoleName string, subject rbacv1.Subject) (annotations.Annotations, error) {
+	name := bindingName(clusterRoleName, subject.Kind, subject.Name)
+
+	err := c.client.RbacV1().ClusterRoleBindings().Delete(ctx, name, metav1.DeleteOptions{})
+	if err == nil {
+		return nil, nil
+	}
+	if !k8serrors.IsNotFound(err) {
+		return nil, fmt.Errorf("baton-kubernetes: failed to delete cluster role binding %s: %w", name, err)
+	}
+
+	return c.revokeSubjectFromClusterRoleBindings(ctx, clusterRoleName, subject)
+}
+
+func (c *clusterRoleBuilder) revokeSubjectFromClusterRoleBindings(ctx context.Context, clusterRoleName string, subject rbacv1.Subject) (annotations.Annotations, error) {
+	l := ctxzap.Extract(ctx)
+
+	var continueToken string
+	for {
+		bindings, err := c.client.RbacV1().ClusterRoleBindings().List(ctx, metav1.ListOptions{
+			Limit:    ResourcesPageSize,
+			Continue: continueToken,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("baton-kubernetes: failed to list cluster role bindings: %w", err)
+		}
+
+		for _, binding := range bindings.Items {
+			if binding.RoleRef.Kind != RoleRefKindClusterRole || binding.RoleRef.Name != clusterRoleName {
+				continue
+			}
+			if updated, found := removeSubject(binding.Subjects, subject); found {
+				if len(updated) == 0 {
+					if err := c.client.RbacV1().ClusterRoleBindings().Delete(ctx, binding.Name, metav1.DeleteOptions{}); err != nil && !k8serrors.IsNotFound(err) {
+						return nil, fmt.Errorf("baton-kubernetes: failed to delete cluster role binding %s: %w", binding.Name, err)
+					}
+				} else {
+					binding.Subjects = updated
+					if _, err := c.client.RbacV1().ClusterRoleBindings().Update(ctx, &binding, metav1.UpdateOptions{}); err != nil {
+						return nil, fmt.Errorf("baton-kubernetes: failed to update cluster role binding %s: %w", binding.Name, err)
+					}
+				}
+				l.Info("revoked subject from cluster role binding", zap.String("binding", binding.Name))
+				return nil, nil
+			}
+		}
+
+		if bindings.Continue == "" {
+			break
+		}
+		continueToken = bindings.Continue
+	}
+
+	return nil, nil
+}
+
+func (c *clusterRoleBuilder) revokeNamespaceScoped(ctx context.Context, clusterRoleName, namespace string, subject rbacv1.Subject) (annotations.Annotations, error) {
+	l := ctxzap.Extract(ctx)
+	name := bindingName(clusterRoleName, subject.Kind, subject.Name)
+
+	err := c.client.RbacV1().RoleBindings(namespace).Delete(ctx, name, metav1.DeleteOptions{})
+	if err == nil {
+		return nil, nil
+	}
+	if !k8serrors.IsNotFound(err) {
+		return nil, fmt.Errorf("baton-kubernetes: failed to delete role binding %s in namespace %s: %w", name, namespace, err)
+	}
+
+	bindings, err := c.client.RbacV1().RoleBindings(namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("baton-kubernetes: failed to list role bindings in namespace %s: %w", namespace, err)
+	}
+
+	for _, binding := range bindings.Items {
+		if binding.RoleRef.Kind != RoleRefKindClusterRole || binding.RoleRef.Name != clusterRoleName {
+			continue
+		}
+		if updated, found := removeSubject(binding.Subjects, subject); found {
+			if len(updated) == 0 {
+				if err := c.client.RbacV1().RoleBindings(namespace).Delete(ctx, binding.Name, metav1.DeleteOptions{}); err != nil && !k8serrors.IsNotFound(err) {
+					return nil, fmt.Errorf("baton-kubernetes: failed to delete role binding %s: %w", binding.Name, err)
+				}
+			} else {
+				binding.Subjects = updated
+				if _, err := c.client.RbacV1().RoleBindings(namespace).Update(ctx, &binding, metav1.UpdateOptions{}); err != nil {
+					return nil, fmt.Errorf("baton-kubernetes: failed to update role binding %s: %w", binding.Name, err)
+				}
+			}
+			l.Info("revoked subject from role binding", zap.String("binding", binding.Name), zap.String("namespace", namespace))
+			return nil, nil
+		}
+	}
+
+	return nil, nil
+}
+
+func removeSubject(subjects []rbacv1.Subject, target rbacv1.Subject) ([]rbacv1.Subject, bool) {
+	var result []rbacv1.Subject
+	found := false
+	for _, s := range subjects {
+		if s.Kind == target.Kind && s.Name == target.Name && s.Namespace == target.Namespace {
+			found = true
+			continue
+		}
+		result = append(result, s)
+	}
+	return result, found
 }
 
 // newClusterRoleBuilder creates a new cluster role builder.

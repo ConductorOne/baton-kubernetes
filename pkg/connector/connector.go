@@ -25,6 +25,8 @@ const (
 	ResourceTypeRoleBinding         = "rolebinding"
 	SubjectTypeGroup                = "Group"
 	SubjectTypeUser                 = "User"
+	RoleRefKindClusterRole          = "ClusterRole"
+	RoleRefKindRole                 = "Role"
 )
 
 // Resource type definitions.
@@ -348,7 +350,7 @@ func (k *Kubernetes) GetMatchingRoleBindings(ctx context.Context, namespace, rol
 
 	var result []rbacv1.RoleBinding
 	for _, binding := range k.roleBindingsCache {
-		if binding.Namespace == namespace && binding.RoleRef.Kind == "Role" && binding.RoleRef.Name == roleName {
+		if binding.Namespace == namespace && binding.RoleRef.Kind == RoleRefKindRole && binding.RoleRef.Name == roleName {
 			result = append(result, binding)
 		}
 	}
@@ -369,14 +371,14 @@ func (k *Kubernetes) GetMatchingBindingsForClusterRole(ctx context.Context, clus
 
 	var roleBindings []rbacv1.RoleBinding
 	for _, binding := range k.roleBindingsCache {
-		if binding.RoleRef.Kind == "ClusterRole" && binding.RoleRef.Name == clusterRoleName {
+		if binding.RoleRef.Kind == RoleRefKindClusterRole && binding.RoleRef.Name == clusterRoleName {
 			roleBindings = append(roleBindings, binding)
 		}
 	}
 
 	var clusterRoleBindings []rbacv1.ClusterRoleBinding
 	for _, binding := range k.clusterRoleBindingsCache {
-		if binding.RoleRef.Kind == "ClusterRole" && binding.RoleRef.Name == clusterRoleName {
+		if binding.RoleRef.Kind == RoleRefKindClusterRole && binding.RoleRef.Name == clusterRoleName {
 			clusterRoleBindings = append(clusterRoleBindings, binding)
 		}
 	}
