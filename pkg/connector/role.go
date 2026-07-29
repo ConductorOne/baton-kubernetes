@@ -84,7 +84,7 @@ func roleResource(role *rbacv1.Role) (*v2.Resource, error) {
 		profileKeyName:              role.Name,
 		profileKeyNamespace:         role.Namespace,
 		profileKeyUID:               string(role.UID),
-		profileKeyCreationTimestamp: role.CreationTimestamp.String(),
+		profileKeyCreationTimestamp: FormatTimestamp(role.CreationTimestamp),
 	}
 
 	// Only add labels and annotations if they're not nil to avoid proto conversion issues
@@ -92,7 +92,12 @@ func roleResource(role *rbacv1.Role) (*v2.Resource, error) {
 		profile[profileKeyLabels] = StringMapToAnyMap(role.Labels)
 	}
 	if role.Annotations != nil {
-		profile[profileKeyAnnotations] = StringMapToAnyMap(role.Annotations)
+		profile[profileKeyAnnotations] = AnnotationsToAnyMap(role.Annotations)
+	}
+
+	// The rules are what the role actually permits; reviewers need them to attest access.
+	for k, v := range PolicyRulesProfile(role.Rules) {
+		profile[k] = v
 	}
 
 	// Get parent namespace resource ID

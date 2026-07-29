@@ -87,9 +87,9 @@ func namespaceResource(ns *corev1.Namespace) (*v2.Resource, error) {
 	profile := map[string]interface{}{
 		profileKeyName:              ns.Name,
 		profileKeyUID:               string(ns.UID),
-		profileKeyCreationTimestamp: ns.CreationTimestamp.String(),
+		profileKeyCreationTimestamp: FormatTimestamp(ns.CreationTimestamp),
 		profileKeyLabels:            StringMapToAnyMap(ns.Labels),
-		profileKeyAnnotations:       StringMapToAnyMap(ns.Annotations),
+		profileKeyAnnotations:       AnnotationsToAnyMap(ns.Annotations),
 	}
 
 	// Add status phase if available

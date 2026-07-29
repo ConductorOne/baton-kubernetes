@@ -95,9 +95,9 @@ func serviceAccountResource(serviceAccount *corev1.ServiceAccount) (*v2.Resource
 		profileKeyName:              serviceAccount.Name,
 		profileKeyNamespace:         serviceAccount.Namespace,
 		profileKeyUID:               string(serviceAccount.UID),
-		profileKeyCreationTimestamp: serviceAccount.CreationTimestamp.String(),
+		profileKeyCreationTimestamp: FormatTimestamp(serviceAccount.CreationTimestamp),
 		profileKeyLabels:            StringMapToAnyMap(serviceAccount.Labels),
-		profileKeyAnnotations:       StringMapToAnyMap(serviceAccount.Annotations),
+		profileKeyAnnotations:       AnnotationsToAnyMap(serviceAccount.Annotations),
 	}
 
 	// Add secrets if present

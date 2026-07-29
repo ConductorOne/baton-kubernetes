@@ -90,9 +90,16 @@ func clusterRoleResource(clusterRole *rbacv1.ClusterRole) (*v2.Resource, error) 
 	profile := map[string]interface{}{
 		profileKeyName:              clusterRole.Name,
 		profileKeyUID:               string(clusterRole.UID),
-		profileKeyCreationTimestamp: clusterRole.CreationTimestamp.String(),
+		profileKeyCreationTimestamp: FormatTimestamp(clusterRole.CreationTimestamp),
 		profileKeyLabels:            StringMapToAnyMap(clusterRole.Labels),
-		profileKeyAnnotations:       StringMapToAnyMap(clusterRole.Annotations),
+		profileKeyAnnotations:       AnnotationsToAnyMap(clusterRole.Annotations),
+	}
+
+	// The rules are what the cluster role actually permits. For aggregated cluster
+	// roles the API server's aggregation controller has already written the
+	// effective rules into the object, so this is the resolved permission set.
+	for k, v := range PolicyRulesProfile(clusterRole.Rules) {
+		profile[k] = v
 	}
 
 	// Add aggregation rule if present
@@ -102,6 +109,8 @@ func clusterRoleResource(clusterRole *rbacv1.ClusterRole) (*v2.Resource, error) 
 			return nil, fmt.Errorf("failed to marshal aggregation rule: %w", err)
 		}
 		profile["aggregationRule"] = agRule
+		// Records that the rules above were computed from the selector, not authored directly.
+		profile[profileKeyAggregated] = true
 	}
 
 	// Create resource as a role - pass the name directly as the raw ID

@@ -4,6 +4,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
+	"time"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
@@ -23,6 +24,38 @@ const (
 	profileKeyLabels            = "labels"
 	profileKeyAnnotations       = "annotations"
 )
+
+// lastAppliedConfigAnnotation holds a full JSON copy of the object as submitted
+// by kubectl apply. It duplicates data the connector syncs as first-class fields
+// (notably RBAC rules) and can be large, so it is excluded from profiles.
+const lastAppliedConfigAnnotation = "kubectl.kubernetes.io/last-applied-configuration"
+
+// FormatTimestamp renders a Kubernetes timestamp as RFC 3339 in UTC, matching
+// what the API returns. time.Time's default String() is neither machine-parseable
+// nor timezone-stable, which makes it unusable as review evidence.
+// A zero timestamp yields an empty string.
+func FormatTimestamp(t metav1.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339)
+}
+
+// AnnotationsToAnyMap converts Kubernetes annotations for a resource profile,
+// dropping annotations that only duplicate synced data.
+func AnnotationsToAnyMap(annotations map[string]string) map[string]any {
+	if annotations == nil {
+		return nil
+	}
+	result := make(map[string]any, len(annotations))
+	for k, v := range annotations {
+		if k == lastAppliedConfigAnnotation {
+			continue
+		}
+		result[k] = v
+	}
+	return result
+}
 
 // ParsePageToken parses a page token into a pagination bag.
 func ParsePageToken(token string) (*pagination.Bag, error) {

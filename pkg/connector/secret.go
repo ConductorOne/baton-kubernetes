@@ -17,19 +17,15 @@ import (
 	"go.uber.org/zap"
 )
 
-// verbGet is the standard Kubernetes RBAC read verb, declared as a constant
-// because it also appears in test fixtures (satisfies goconst).
-const verbGet = "get"
-
 // Standard verb entitlements for Kubernetes resources.
 var standardResourceVerbs = []string{
 	verbGet,
-	"list",
-	"watch",
-	"create",
-	"update",
-	"patch",
-	"delete",
+	verbList,
+	verbWatch,
+	verbCreate,
+	verbUpdate,
+	verbPatch,
+	verbDelete,
 }
 
 // secretBuilder syncs Kubernetes Secrets as Baton resources.
@@ -116,9 +112,9 @@ func secretResource(secret *corev1.Secret) (*v2.Resource, error) {
 		profileKeyName:              secret.Name,
 		profileKeyNamespace:         secret.Namespace,
 		profileKeyUID:               string(secret.UID),
-		profileKeyCreationTimestamp: secret.CreationTimestamp.String(),
+		profileKeyCreationTimestamp: FormatTimestamp(secret.CreationTimestamp),
 		profileKeyLabels:            StringMapToAnyMap(secret.Labels),
-		profileKeyAnnotations:       StringMapToAnyMap(secret.Annotations),
+		profileKeyAnnotations:       AnnotationsToAnyMap(secret.Annotations),
 		"type":                      string(secret.Type),
 	}
 
