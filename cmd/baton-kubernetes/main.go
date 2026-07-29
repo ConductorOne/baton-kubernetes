@@ -9,9 +9,11 @@ import (
 	"github.com/conductorone/baton-kubernetes/pkg/connector"
 	sdkconfig "github.com/conductorone/baton-sdk/pkg/config"
 	"github.com/conductorone/baton-sdk/pkg/connectorbuilder"
+	"github.com/conductorone/baton-sdk/pkg/connectorrunner"
 	"github.com/conductorone/baton-sdk/pkg/types"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"k8s.io/client-go/rest"
 )
 
 var version = "dev"
@@ -30,6 +32,15 @@ func main() {
 		return connectorbuilder.NewConnector(ctx, k)
 	}
 
+	// The capabilities sub-command instantiates the connector with an empty REST
+	// config and every resource type registered, so the generated manifest
+	// declares the full surface — including the opt-in workload types, which
+	// carry the OptInRequired annotation but are excluded from the default sync.
+	runnerOpts := []connectorrunner.Option{}
+	if capBuilder, err := connector.New(ctx, &rest.Config{}, connector.WithSyncResources(connector.AllResourceTypeIDs)); err == nil {
+		runnerOpts = append(runnerOpts, connectorrunner.WithDefaultCapabilitiesConnectorBuilder(capBuilder))
+	}
+
 	var cmd *cobra.Command
 	var err error
 	v, cmd, err = sdkconfig.DefineConfiguration(
@@ -37,6 +48,7 @@ func main() {
 		"baton-kubernetes",
 		getConnector,
 		pkgconfig.Configuration,
+		runnerOpts...,
 	)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err.Error())

@@ -35,26 +35,6 @@ const (
 	RBACKindRole = "Role"
 )
 
-// Resource type definitions.
-var (
-	ResourceTypeNamespace      = &v2.ResourceType{Id: profileKeyNamespace, DisplayName: "Namespace"}
-	ResourceTypeServiceAccount = &v2.ResourceType{Id: "service_account", DisplayName: "Service Account", Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_USER}}
-	ResourceTypeRole           = &v2.ResourceType{Id: "role", DisplayName: RBACKindRole, Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_ROLE}}
-	ResourceTypeClusterRole    = &v2.ResourceType{Id: "cluster_role", DisplayName: "Cluster Role", Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_ROLE}}
-	ResourceTypeSecret         = &v2.ResourceType{Id: "secret", DisplayName: "Secret", Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_SECRET}}
-	ResourceTypeConfigMap      = &v2.ResourceType{Id: "configmap", DisplayName: "Config Map"}
-	ResourceTypeNode           = &v2.ResourceType{Id: "node", DisplayName: "Node"}
-	ResourceTypePod            = &v2.ResourceType{Id: "pod", DisplayName: "Pod"}
-	ResourceTypeDeployment     = &v2.ResourceType{Id: "deployment", DisplayName: "Deployment"}
-	ResourceTypeStatefulSet    = &v2.ResourceType{Id: "statefulset", DisplayName: "Stateful Set"}
-	ResourceTypeDaemonSet      = &v2.ResourceType{Id: "daemonset", DisplayName: "Daemon Set"}
-	ResourceTypeKubeUser       = &v2.ResourceType{Id: "kube_user", DisplayName: "Kubernetes User", Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_USER}}
-	ResourceTypeKubeGroup      = &v2.ResourceType{Id: "kube_group", DisplayName: "Kubernetes Group", Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_GROUP}}
-	ResourceTypeBinding        = &v2.ResourceType{Id: "binding", DisplayName: "Binding", Description: "Internal type for processing RBAC bindings"}
-	ResourceTypeUser           = &v2.ResourceType{Id: "user", DisplayName: SubjectTypeUser, Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_USER}}
-	ResourceTypeGroup          = &v2.ResourceType{Id: "group", DisplayName: SubjectTypeGroup, Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_GROUP}}
-)
-
 // Configuration options.
 type ConnectorOpts struct {
 	SyncResources []string
@@ -244,20 +224,9 @@ func NewFromConfig(ctx context.Context, cfg *pkgconfig.Kubernetes, syncResourceT
 		ResourceTypeKubeGroup.Id,
 	}
 	if len(syncResourceTypes) > 0 {
-		knownTypes := map[string]bool{
-			ResourceTypeNamespace.Id:      true,
-			ResourceTypeServiceAccount.Id: true,
-			ResourceTypeRole.Id:           true,
-			ResourceTypeClusterRole.Id:    true,
-			ResourceTypeKubeUser.Id:       true,
-			ResourceTypeKubeGroup.Id:      true,
-			ResourceTypeConfigMap.Id:      true,
-			ResourceTypeSecret.Id:         true,
-			ResourceTypePod.Id:            true,
-			ResourceTypeNode.Id:           true,
-			ResourceTypeDeployment.Id:     true,
-			ResourceTypeStatefulSet.Id:    true,
-			ResourceTypeDaemonSet.Id:      true,
+		knownTypes := make(map[string]bool, len(AllResourceTypeIDs))
+		for _, id := range AllResourceTypeIDs {
+			knownTypes[id] = true
 		}
 		// Deduplicate: users may repeat entries, and the SDK's env-var binding
 		// (BATON_SYNC_RESOURCE_TYPES) can deliver the same value twice.

@@ -16,6 +16,54 @@
     },
     {
       "resourceType": {
+        "id": "configmap",
+        "displayName": "Config Map",
+        "annotations": [
+          {
+            "@type": "type.googleapis.com/c1.connector.v2.OptInRequired"
+          }
+        ]
+      },
+      "capabilities": [
+        "CAPABILITY_SYNC"
+      ],
+      "permissions": {},
+      "optInRequired": true
+    },
+    {
+      "resourceType": {
+        "id": "daemonset",
+        "displayName": "Daemon Set",
+        "annotations": [
+          {
+            "@type": "type.googleapis.com/c1.connector.v2.OptInRequired"
+          }
+        ]
+      },
+      "capabilities": [
+        "CAPABILITY_SYNC"
+      ],
+      "permissions": {},
+      "optInRequired": true
+    },
+    {
+      "resourceType": {
+        "id": "deployment",
+        "displayName": "Deployment",
+        "annotations": [
+          {
+            "@type": "type.googleapis.com/c1.connector.v2.OptInRequired"
+          }
+        ]
+      },
+      "capabilities": [
+        "CAPABILITY_SYNC"
+      ],
+      "permissions": {},
+      "optInRequired": true
+    },
+    {
+      "resourceType": {
         "id": "kube_group",
         "displayName": "Kubernetes Group",
         "traits": [
@@ -52,6 +100,38 @@
     },
     {
       "resourceType": {
+        "id": "node",
+        "displayName": "Node",
+        "annotations": [
+          {
+            "@type": "type.googleapis.com/c1.connector.v2.OptInRequired"
+          }
+        ]
+      },
+      "capabilities": [
+        "CAPABILITY_SYNC"
+      ],
+      "permissions": {},
+      "optInRequired": true
+    },
+    {
+      "resourceType": {
+        "id": "pod",
+        "displayName": "Pod",
+        "annotations": [
+          {
+            "@type": "type.googleapis.com/c1.connector.v2.OptInRequired"
+          }
+        ]
+      },
+      "capabilities": [
+        "CAPABILITY_SYNC"
+      ],
+      "permissions": {},
+      "optInRequired": true
+    },
+    {
+      "resourceType": {
         "id": "role",
         "displayName": "Role",
         "traits": [
@@ -65,6 +145,25 @@
     },
     {
       "resourceType": {
+        "id": "secret",
+        "displayName": "Secret",
+        "traits": [
+          "TRAIT_SECRET"
+        ],
+        "annotations": [
+          {
+            "@type": "type.googleapis.com/c1.connector.v2.OptInRequired"
+          }
+        ]
+      },
+      "capabilities": [
+        "CAPABILITY_SYNC"
+      ],
+      "permissions": {},
+      "optInRequired": true
+    },
+    {
+      "resourceType": {
         "id": "service_account",
         "displayName": "Service Account",
         "traits": [
@@ -75,6 +174,22 @@
         "CAPABILITY_SYNC"
       ],
       "permissions": {}
+    },
+    {
+      "resourceType": {
+        "id": "statefulset",
+        "displayName": "Stateful Set",
+        "annotations": [
+          {
+            "@type": "type.googleapis.com/c1.connector.v2.OptInRequired"
+          }
+        ]
+      },
+      "capabilities": [
+        "CAPABILITY_SYNC"
+      ],
+      "permissions": {},
+      "optInRequired": true
     }
   ],
   "connectorCapabilities": [
