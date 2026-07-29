@@ -8,15 +8,6 @@ import "github.com/conductorone/baton-sdk/pkg/field"
 // https://github.com/kubernetes/cli-runtime/blob/v0.32.3/pkg/genericclioptions/config_flags.go#L46
 
 const (
-	// Partial resource sync flags — off by default.
-	FlagSyncConfigMaps   = "sync-config-maps"
-	FlagSyncSecrets      = "sync-secrets"
-	FlagSyncPods         = "sync-pods"
-	FlagSyncNodes        = "sync-nodes"
-	FlagSyncDeployments  = "sync-deployments"
-	FlagSyncStatefulSets = "sync-stateful-sets"
-	FlagSyncDaemonSets   = "sync-daemon-sets"
-
 	// From k8s.io/cli-runtime/pkg/genericclioptions/config_flags.go.
 	FlagClusterName        = "cluster"
 	FlagAuthInfoName       = "user"
@@ -141,48 +132,6 @@ var (
 		field.WithDescription("If true, opt-out of response compression for all requests to the server"),
 		field.WithDefaultValue(false),
 	)
-	syncConfigMapsField = field.BoolField(
-		FlagSyncConfigMaps,
-		field.WithDescription("Sync ConfigMap resources (disabled by default)"),
-		field.WithDefaultValue(false),
-		field.WithExportTarget(field.ExportTargetCLIOnly),
-	)
-	syncSecretsField = field.BoolField(
-		FlagSyncSecrets,
-		field.WithDescription("Sync Secret resources (disabled by default)"),
-		field.WithDefaultValue(false),
-		field.WithExportTarget(field.ExportTargetCLIOnly),
-	)
-	syncPodsField = field.BoolField(
-		FlagSyncPods,
-		field.WithDescription("Sync Pod resources (disabled by default)"),
-		field.WithDefaultValue(false),
-		field.WithExportTarget(field.ExportTargetCLIOnly),
-	)
-	syncNodesField = field.BoolField(
-		FlagSyncNodes,
-		field.WithDescription("Sync Node resources (disabled by default)"),
-		field.WithDefaultValue(false),
-		field.WithExportTarget(field.ExportTargetCLIOnly),
-	)
-	syncDeploymentsField = field.BoolField(
-		FlagSyncDeployments,
-		field.WithDescription("Sync Deployment resources (disabled by default)"),
-		field.WithDefaultValue(false),
-		field.WithExportTarget(field.ExportTargetCLIOnly),
-	)
-	syncStatefulSetsField = field.BoolField(
-		FlagSyncStatefulSets,
-		field.WithDescription("Sync StatefulSet resources (disabled by default)"),
-		field.WithDefaultValue(false),
-		field.WithExportTarget(field.ExportTargetCLIOnly),
-	)
-	syncDaemonSetsField = field.BoolField(
-		FlagSyncDaemonSets,
-		field.WithDescription("Sync DaemonSet resources (disabled by default)"),
-		field.WithDefaultValue(false),
-		field.WithExportTarget(field.ExportTargetCLIOnly),
-	)
 )
 
 // ConfigurationFields lists all connector-specific schema fields.
@@ -207,13 +156,6 @@ var ConfigurationFields = []field.SchemaField{
 	caFileField,
 	timeoutField,
 	disableCompressionField,
-	syncConfigMapsField,
-	syncSecretsField,
-	syncPodsField,
-	syncNodesField,
-	syncDeploymentsField,
-	syncStatefulSetsField,
-	syncDaemonSetsField,
 }
 
 // ConfigRelations lists mutual-exclusivity and required-together constraints.

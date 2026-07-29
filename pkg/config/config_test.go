@@ -29,13 +29,6 @@ func TestConfigurationFields(t *testing.T) {
 		config.FlagCAFile,
 		config.FlagTimeout,
 		config.FlagDisableCompression,
-		config.FlagSyncConfigMaps,
-		config.FlagSyncSecrets,
-		config.FlagSyncPods,
-		config.FlagSyncNodes,
-		config.FlagSyncDeployments,
-		config.FlagSyncStatefulSets,
-		config.FlagSyncDaemonSets,
 	}
 
 	got := make(map[string]bool)

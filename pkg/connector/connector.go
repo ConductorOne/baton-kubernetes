@@ -115,7 +115,12 @@ type Kubernetes struct {
 // It validates kubeconfig paths, builds a REST config, and assembles the
 // list of resource types to sync. This is the constructor used by the
 // standalone baton-kubernetes CLI.
-func NewFromConfig(ctx context.Context, cfg *pkgconfig.Kubernetes) (*Kubernetes, error) {
+//
+// syncResourceTypes is the user's --sync-resource-types selection (the SDK's
+// built-in flag, also populated by the C1 resource type selector). When empty,
+// the default core RBAC set is synced; when set, exactly the requested types
+// are registered.
+func NewFromConfig(ctx context.Context, cfg *pkgconfig.Kubernetes, syncResourceTypes []string) (*Kubernetes, error) {
 	opt := clioptions.NewConfigFlags(true)
 
 	// --- Kubeconfig source resolution ---
@@ -225,29 +230,52 @@ func NewFromConfig(ctx context.Context, cfg *pkgconfig.Kubernetes) (*Kubernetes,
 	}
 
 	// --- Assemble syncResources list ---
-	// Core RBAC resources are always included. Workload/config resources are opt-in
-	// via flags because they expose verb entitlements that never produce grants,
-	// resulting in noisy partial resources in ConductorOne.
+	// By default only the core RBAC resource types are synced: the workload and
+	// configuration types expose verb entitlements that never produce grants,
+	// resulting in noisy partial resources in ConductorOne. An explicit
+	// --sync-resource-types selection overrides the default entirely and
+	// registers exactly the requested types.
 	syncResources := []string{
-		profileKeyNamespace,
-		"service_account",
-		"role",
-		"cluster_role",
-		"kube_user",
-		"kube_group",
+		ResourceTypeNamespace.Id,
+		ResourceTypeServiceAccount.Id,
+		ResourceTypeRole.Id,
+		ResourceTypeClusterRole.Id,
+		ResourceTypeKubeUser.Id,
+		ResourceTypeKubeGroup.Id,
 	}
-	optionalResources := map[string]bool{
-		"configmap":   cfg.SyncConfigMaps,
-		"secret":      cfg.SyncSecrets,
-		"pod":         cfg.SyncPods,
-		"node":        cfg.SyncNodes,
-		"deployment":  cfg.SyncDeployments,
-		"statefulset": cfg.SyncStatefulSets,
-		"daemonset":   cfg.SyncDaemonSets,
-	}
-	for resourceID, enabled := range optionalResources {
-		if enabled {
-			syncResources = append(syncResources, resourceID)
+	if len(syncResourceTypes) > 0 {
+		knownTypes := map[string]bool{
+			ResourceTypeNamespace.Id:      true,
+			ResourceTypeServiceAccount.Id: true,
+			ResourceTypeRole.Id:           true,
+			ResourceTypeClusterRole.Id:    true,
+			ResourceTypeKubeUser.Id:       true,
+			ResourceTypeKubeGroup.Id:      true,
+			ResourceTypeConfigMap.Id:      true,
+			ResourceTypeSecret.Id:         true,
+			ResourceTypePod.Id:            true,
+			ResourceTypeNode.Id:           true,
+			ResourceTypeDeployment.Id:     true,
+			ResourceTypeStatefulSet.Id:    true,
+			ResourceTypeDaemonSet.Id:      true,
+		}
+		// Deduplicate: users may repeat entries, and the SDK's env-var binding
+		// (BATON_SYNC_RESOURCE_TYPES) can deliver the same value twice.
+		seen := make(map[string]bool, len(syncResourceTypes))
+		syncResources = syncResources[:0]
+		for _, id := range syncResourceTypes {
+			if !knownTypes[id] {
+				ctxzap.Extract(ctx).Warn("ignoring unknown resource type in sync-resource-types", zap.String("resource_type", id))
+				continue
+			}
+			if seen[id] {
+				continue
+			}
+			seen[id] = true
+			syncResources = append(syncResources, id)
+		}
+		if len(syncResources) == 0 {
+			return nil, fmt.Errorf("sync-resource-types matched no known resource types: %v", syncResourceTypes)
 		}
 	}
 

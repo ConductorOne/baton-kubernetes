@@ -24,13 +24,6 @@ type Kubernetes struct {
 	CertificateAuthority string `mapstructure:"certificate-authority"`
 	RequestTimeout string `mapstructure:"request-timeout"`
 	DisableCompression bool `mapstructure:"disable-compression"`
-	SyncConfigMaps bool `mapstructure:"sync-config-maps"`
-	SyncSecrets bool `mapstructure:"sync-secrets"`
-	SyncPods bool `mapstructure:"sync-pods"`
-	SyncNodes bool `mapstructure:"sync-nodes"`
-	SyncDeployments bool `mapstructure:"sync-deployments"`
-	SyncStatefulSets bool `mapstructure:"sync-stateful-sets"`
-	SyncDaemonSets bool `mapstructure:"sync-daemon-sets"`
 }
 
 func (c *Kubernetes) findFieldByTag(tagValue string) (any, bool) {

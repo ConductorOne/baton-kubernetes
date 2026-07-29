@@ -54,6 +54,8 @@ baton resources
 | ConfigMap | ConfigMap resource | — |
 | Secret | Secret resource | — |
 
+By default only the core RBAC resource types are synced (namespace, service_account, role, cluster_role, kube_user, kube_group). Workload and configuration types (node, pod, deployment, statefulset, daemonset, configmap, secret) are opt-in via the standard `--sync-resource-types` flag (`BATON_SYNC_RESOURCE_TYPES`). An explicit selection replaces the default set, so list every resource type ID you want, e.g. `--sync-resource-types namespace,service_account,role,cluster_role,kube_user,kube_group,pod`.
+
 ## Group Membership
 
 Kubernetes group membership is not a native API object. Groups exist only as claims in authentication credentials and are never persisted in the cluster. The connector discovers group membership by one method only:
