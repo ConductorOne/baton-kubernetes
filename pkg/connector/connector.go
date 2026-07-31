@@ -33,6 +33,9 @@ const (
 	// RBACKindRole is the Kubernetes RBAC Kind value for Role objects; it also
 	// matches the connector's Role resource type DisplayName.
 	RBACKindRole = "Role"
+
+	connectorDisplayName = "Kubernetes"
+	connectorDescription = "Connector for Kubernetes resources and RBAC permissions"
 )
 
 // Configuration options.
@@ -396,9 +399,52 @@ func (k *Kubernetes) ResourceSyncers(ctx context.Context) []connectorbuilder.Res
 // Metadata returns the connector metadata.
 func (k *Kubernetes) Metadata(ctx context.Context) (*v2.ConnectorMetadata, error) {
 	return &v2.ConnectorMetadata{
-		DisplayName: "Kubernetes",
-		Description: "Connector for Kubernetes resources and RBAC permissions",
+		DisplayName: connectorDisplayName,
+		Description: connectorDescription,
 	}, nil
+}
+
+// DefaultCapabilitiesBuilder returns every resource type unconditionally so the
+// generated capabilities manifest is always complete, regardless of how a given
+// deployment narrows the sync with --sync-resource-types. The opt-in workload
+// types are declared here too; their OptInRequired annotations mark them as
+// excluded from the default sync.
+//
+// It needs no Kubernetes client: capabilities generation only reads each
+// syncer's ResourceType and checks which optional interfaces it implements.
+func DefaultCapabilitiesBuilder() connectorbuilder.ConnectorBuilder {
+	return &defaultCapabilitiesBuilder{}
+}
+
+type defaultCapabilitiesBuilder struct{}
+
+func (d *defaultCapabilitiesBuilder) Metadata(_ context.Context) (*v2.ConnectorMetadata, error) {
+	return &v2.ConnectorMetadata{
+		DisplayName: connectorDisplayName,
+		Description: connectorDescription,
+	}, nil
+}
+
+func (d *defaultCapabilitiesBuilder) Validate(_ context.Context) (annotations.Annotations, error) {
+	return nil, nil
+}
+
+func (d *defaultCapabilitiesBuilder) ResourceSyncers(_ context.Context) []connectorbuilder.ResourceSyncer {
+	return []connectorbuilder.ResourceSyncer{
+		newNamespaceBuilder(nil),
+		newServiceAccountBuilder(nil),
+		newRoleBuilder(nil, nil),
+		newClusterRoleBuilder(nil, nil),
+		newKubeUserBuilder(nil, nil),
+		newKubeGroupBuilder(nil, nil),
+		newConfigMapBuilder(nil),
+		newSecretBuilder(nil),
+		newPodBuilder(nil),
+		newNodeBuilder(nil),
+		newDeploymentBuilder(nil),
+		newStatefulSetBuilder(nil),
+		newDaemonSetBuilder(nil),
+	}
 }
 
 // Validate validates the connector configuration.

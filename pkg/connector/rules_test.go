@@ -1,6 +1,7 @@
 package connector
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -164,4 +165,28 @@ func TestAnnotationsToAnyMap(t *testing.T) {
 	assert.Len(t, out, 2)
 
 	assert.Nil(t, AnnotationsToAnyMap(nil))
+}
+
+// TestDefaultCapabilitiesBuilder verifies the capabilities builder declares every
+// resource type without a Kubernetes client, so the generated manifest is complete
+// regardless of how a deployment narrows the sync.
+func TestDefaultCapabilitiesBuilder(t *testing.T) {
+	ctx := context.Background()
+	b := DefaultCapabilitiesBuilder()
+
+	md, err := b.Metadata(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, connectorDisplayName, md.GetDisplayName())
+
+	annos, err := b.Validate(ctx)
+	require.NoError(t, err)
+	assert.Nil(t, annos)
+
+	syncers := b.ResourceSyncers(ctx)
+	got := make([]string, 0, len(syncers))
+	for _, s := range syncers {
+		got = append(got, s.ResourceType(ctx).GetId())
+	}
+	assert.ElementsMatch(t, AllResourceTypeIDs, got,
+		"the capabilities builder must declare exactly the connector's full resource type surface")
 }
