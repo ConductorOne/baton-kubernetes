@@ -115,13 +115,18 @@ func NewFromConfig(ctx context.Context, cfg *pkgconfig.Kubernetes, syncResourceT
 			return nil, fmt.Errorf("error accessing kubeconfig file: %w", err)
 		}
 		opt.KubeConfig = pointer.To(cfg.Kubeconfig)
-	} else {
-		// No explicit kubeconfig source. Verify that at least one implicit source
-		// is available: the KUBECONFIG env var (a path list honored by client-go's
-		// default loading rules), the default kubeconfig file, or an in-cluster
-		// service account. client-go silently falls back to localhost:8080 when
-		// none exists, which produces a confusing "connection refused" error
-		// instead of a missing-auth message.
+	} else if cfg.Server == "" {
+		// No kubeconfig and no explicit API server. Verify that at least one
+		// implicit source is available: the KUBECONFIG env var (a path list
+		// honored by client-go's default loading rules), the default kubeconfig
+		// file, or an in-cluster service account. client-go silently falls back
+		// to localhost:8080 when none exists, which produces a confusing
+		// "connection refused" error instead of a missing-auth message.
+		//
+		// With --server set there is no silent fallback: the connection target is
+		// explicit and credentials come from --token, --client-certificate/--client-key
+		// or the in-cluster service account, so this check must not run — it would
+		// reject the documented bearer-token setup on hosts without a kubeconfig.
 		envHasKubeconfig := false
 		for _, p := range filepath.SplitList(os.Getenv("KUBECONFIG")) {
 			if p == "" {
