@@ -44,6 +44,15 @@ func (c *clusterRoleBuilder) List(ctx context.Context, parentResourceID *v2.Reso
 	// Initialize empty resource slice
 	var rv []*v2.Resource
 
+	// An empty page token marks the start of a new sync. Drop the shared
+	// binding caches so this sync's grants reflect current cluster state
+	// rather than whatever the first sync of this process observed.
+	if pToken.Token == "" && c.bindingProvider != nil {
+		if k8s, ok := c.bindingProvider.(*Kubernetes); ok {
+			k8s.invalidateBindingsCaches()
+		}
+	}
+
 	// Parse pagination token
 	bag, err := ParsePageToken(pToken.Token)
 	if err != nil {

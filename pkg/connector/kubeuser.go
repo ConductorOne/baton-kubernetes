@@ -50,9 +50,19 @@ func (k *kubeUserBuilder) List(ctx context.Context, parentResourceID *v2.Resourc
 	l := ctxzap.Extract(ctx)
 	var rv []*v2.Resource
 
-	// Initialize empty user cache if needed
+	// The dedup cache is scoped to a single sync. The SDK creates one builder per
+	// connector, and in service mode that instance is reused for every sync task,
+	// so a cache that survives means every principal looks already-processed and
+	// the next sync emits none of them. An empty page token marks the start of a
+	// new sync, so the cache (and the secrets scan it feeds) is discarded here.
+	if pToken.Token == "" && k.k8s != nil {
+		k.k8s.secretsMu.Lock()
+		k.k8s.secretsAccumulator = nil
+		k.k8s.secretsResult = nil
+		k.k8s.secretsMu.Unlock()
+	}
 	k.userCacheLock.Lock()
-	if k.userCache == nil {
+	if pToken.Token == "" || k.userCache == nil {
 		k.userCache = make(map[string]bool)
 	}
 	k.userCacheLock.Unlock()

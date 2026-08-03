@@ -278,3 +278,45 @@ func TestRoleBuilderGrants_ServiceAccountSubjectWithoutNamespace(t *testing.T) {
 	assert.Equal(t, ResourceTypeServiceAccount.Id, grants[0].Principal.Id.ResourceType)
 	assert.Equal(t, "app-ns/runner", grants[0].Principal.Id.Resource)
 }
+
+// TestRoleBuilderGrantsAcrossSyncs verifies the shared binding caches are dropped
+// at the start of a sync. They live on the Kubernetes struct, which in service
+// mode survives for the whole process, so without invalidation every sync after
+// the first would report grants from the first sync's bindings forever.
+func TestRoleBuilderGrantsAcrossSyncs(t *testing.T) {
+	role := &rbacv1.Role{
+		ObjectMeta: metav1.ObjectMeta{Name: "pod-reader", Namespace: "team-a"},
+	}
+	firstBinding := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: "rb-alice", Namespace: "team-a"},
+		Subjects:   []rbacv1.Subject{{Kind: SubjectKindUser, Name: "alice", APIGroup: RBACAPIGroup}},
+		RoleRef:    rbacv1.RoleRef{Kind: RBACKindRole, Name: "pod-reader", APIGroup: RBACAPIGroup},
+	}
+	fakeClient := fake.NewSimpleClientset(role, firstBinding)
+	k8s := &Kubernetes{client: fakeClient}
+	builder := newRoleBuilder(fakeClient, k8s)
+	ctx := context.Background()
+	resource := &v2.Resource{Id: &v2.ResourceId{ResourceType: ResourceTypeRole.Id, Resource: "team-a/pod-reader"}}
+
+	// Sync 1: list (which invalidates), then grants.
+	_, _, _, err := builder.List(ctx, nil, &pagination.Token{})
+	require.NoError(t, err)
+	grants, _, _, err := builder.Grants(ctx, resource, &pagination.Token{})
+	require.NoError(t, err)
+	require.Len(t, grants, 1)
+
+	// A second subject is bound in the cluster between syncs.
+	_, err = fakeClient.RbacV1().RoleBindings("team-a").Create(ctx, &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: "rb-bob", Namespace: "team-a"},
+		Subjects:   []rbacv1.Subject{{Kind: SubjectKindUser, Name: "bob", APIGroup: RBACAPIGroup}},
+		RoleRef:    rbacv1.RoleRef{Kind: RBACKindRole, Name: "pod-reader", APIGroup: RBACAPIGroup},
+	}, metav1.CreateOptions{})
+	require.NoError(t, err)
+
+	// Sync 2 on the same builder must observe the new binding.
+	_, _, _, err = builder.List(ctx, nil, &pagination.Token{})
+	require.NoError(t, err)
+	grants, _, _, err = builder.Grants(ctx, resource, &pagination.Token{})
+	require.NoError(t, err)
+	assert.Len(t, grants, 2, "a later sync must reflect bindings added since the first sync")
+}

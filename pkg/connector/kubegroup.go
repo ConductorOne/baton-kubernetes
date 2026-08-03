@@ -43,9 +43,12 @@ func (k *kubeGroupBuilder) List(ctx context.Context, parentResourceID *v2.Resour
 	l := ctxzap.Extract(ctx)
 	var rv []*v2.Resource
 
-	// Initialize empty group cache if needed
+	// The dedup cache is scoped to a single sync; see kubeUserBuilder.List. An
+	// empty page token marks the start of a new sync, so it is discarded here --
+	// otherwise a service-mode process emits zero groups on every sync after the
+	// first.
 	k.groupCacheLock.Lock()
-	if k.groupCache == nil {
+	if pToken.Token == "" || k.groupCache == nil {
 		k.groupCache = make(map[string]bool)
 	}
 	k.groupCacheLock.Unlock()

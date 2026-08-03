@@ -459,6 +459,23 @@ func (k *Kubernetes) Validate(ctx context.Context) (annotations.Annotations, err
 	return nil, nil
 }
 
+// invalidateBindingsCaches drops the cached RoleBindings and ClusterRoleBindings
+// so the next Grants call reloads them from the API.
+//
+// The caches are scoped to a single sync, but the Kubernetes struct lives for the
+// whole process. In service mode that means a cache loaded during the first sync
+// would otherwise be reused forever, freezing every role and cluster role grant
+// at the state of the first sync. The role and cluster role builders call this
+// when they begin listing (empty page token), which always precedes the grants
+// phase of that sync.
+func (k *Kubernetes) invalidateBindingsCaches() {
+	k.bindingsMutex.Lock()
+	defer k.bindingsMutex.Unlock()
+	k.roleBindingsCache = nil
+	k.clusterRoleBindingsCache = nil
+	k.bindingsLoaded = false
+}
+
 // loadBindingsCaches ensures that both binding caches are loaded
 // It uses a mutex to ensure thread safety.
 func (k *Kubernetes) loadBindingsCaches(ctx context.Context) error {

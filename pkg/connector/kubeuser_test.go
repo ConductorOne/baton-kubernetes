@@ -18,6 +18,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -263,4 +264,56 @@ func TestKubeUserBuilderPhase3SecretsListTransientError(t *testing.T) {
 	result := k8s.secretsResult
 	k8s.secretsMu.Unlock()
 	assert.Nil(t, result, "an incomplete result must not be sealed on a real failure")
+}
+
+// TestKubeUserBuilderListAcrossSyncs reproduces the service-mode failure where a
+// second sync in the same process emitted zero users: the dedup cache lives on
+// the builder, which the SDK instantiates once per connector, so every principal
+// looked "already processed" on the next sync.
+func TestKubeUserBuilderListAcrossSyncs(t *testing.T) {
+	rb := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: "rb", Namespace: "team-a"},
+		Subjects: []rbacv1.Subject{
+			{Kind: SubjectKindUser, Name: "alice@example.com", APIGroup: RBACAPIGroup},
+		},
+		RoleRef: rbacv1.RoleRef{Kind: RBACKindRole, Name: "some-role", APIGroup: RBACAPIGroup},
+	}
+	fakeClient := fake.NewSimpleClientset(rb)
+	k8s := &Kubernetes{client: fakeClient}
+	builder := newKubeUserBuilder(fakeClient, k8s)
+	ctx := context.Background()
+
+	// Sync 1: a fresh sync always starts with an empty page token.
+	first, _, _, err := builder.List(ctx, nil, &pagination.Token{})
+	require.NoError(t, err)
+	require.Len(t, first, 1, "first sync must emit the user")
+
+	// Sync 2: same builder instance, as in a long-running service-mode process.
+	second, _, _, err := builder.List(ctx, nil, &pagination.Token{})
+	require.NoError(t, err)
+	assert.Len(t, second, 1, "a later sync must re-emit the user, not drop it")
+}
+
+// TestKubeGroupBuilderListAcrossSyncs is the kube_group half of the same bug.
+func TestKubeGroupBuilderListAcrossSyncs(t *testing.T) {
+	rb := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: "rb", Namespace: "team-a"},
+		Subjects: []rbacv1.Subject{
+			{Kind: SubjectKindGroup, Name: "developers", APIGroup: RBACAPIGroup},
+		},
+		RoleRef: rbacv1.RoleRef{Kind: RBACKindRole, Name: "some-role", APIGroup: RBACAPIGroup},
+	}
+	fakeClient := fake.NewSimpleClientset(rb)
+	k8s := &Kubernetes{client: fakeClient}
+	builder := newKubeGroupBuilder(fakeClient, k8s)
+	ctx := context.Background()
+
+	first, _, _, err := builder.List(ctx, nil, &pagination.Token{})
+	require.NoError(t, err)
+	firstCount := len(first)
+	require.NotZero(t, firstCount, "first sync must emit groups")
+
+	second, _, _, err := builder.List(ctx, nil, &pagination.Token{})
+	require.NoError(t, err)
+	assert.Equal(t, firstCount, len(second), "a later sync must re-emit the same groups")
 }
