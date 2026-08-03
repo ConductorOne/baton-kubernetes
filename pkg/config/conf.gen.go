@@ -5,18 +5,14 @@ import "reflect"
 
 type Kubernetes struct {
 	Kubeconfig string `mapstructure:"kubeconfig"`
-	CacheDir string `mapstructure:"cache-dir"`
 	ClientCertificate string `mapstructure:"client-certificate"`
 	ClientKey string `mapstructure:"client-key"`
 	Token string `mapstructure:"token"`
 	As string `mapstructure:"as"`
 	AsUid string `mapstructure:"as-uid"`
 	AsGroup []string `mapstructure:"as-group"`
-	Username string `mapstructure:"username"`
-	Password string `mapstructure:"password"`
 	Cluster string `mapstructure:"cluster"`
 	User string `mapstructure:"user"`
-	Namespace string `mapstructure:"namespace"`
 	Context string `mapstructure:"context"`
 	Server string `mapstructure:"server"`
 	TlsServerName string `mapstructure:"tls-server-name"`

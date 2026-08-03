@@ -12,7 +12,6 @@ const (
 	FlagClusterName        = "cluster"
 	FlagAuthInfoName       = "user"
 	FlagContext            = "context"
-	FlagNamespace          = "namespace"
 	FlagAPIServer          = "server"
 	FlagTLSServerName      = "tls-server-name"
 	FlagInsecure           = "insecure-skip-tls-verify"
@@ -23,10 +22,7 @@ const (
 	FlagImpersonate        = "as"
 	FlagImpersonateUID     = "as-uid"
 	FlagImpersonateGroup   = "as-group"
-	FlagUsername           = "username"
-	FlagPassword           = "password"
 	FlagTimeout            = "request-timeout"
-	FlagCacheDir           = "cache-dir"
 	FlagDisableCompression = "disable-compression"
 	FlagKubeconfig         = "kubeconfig"
 )
@@ -35,10 +31,6 @@ var (
 	kubeconfigField = field.StringField(
 		FlagKubeconfig,
 		field.WithDescription("Path to the kubeconfig file to use for CLI requests."),
-	)
-	cacheDirField = field.StringField(
-		FlagCacheDir,
-		field.WithDescription("Default cache directory"),
 	)
 	certFileField = field.StringField(
 		FlagCertFile,
@@ -70,17 +62,6 @@ var (
 		field.WithDescription("Group to impersonate for the operation, this flag can be repeated to specify multiple groups."),
 		field.WithRequired(false),
 	)
-	usernameField = field.StringField(
-		FlagUsername,
-		field.WithDescription("Username for basic authentication to the API server"),
-		field.WithRequired(false),
-	)
-	passwordField = field.StringField(
-		FlagPassword,
-		field.WithDescription("Password for basic authentication to the API server"),
-		field.WithRequired(false),
-		field.WithIsSecret(true),
-	)
 	clusterNameField = field.StringField(
 		FlagClusterName,
 		field.WithDescription("The name of the kubeconfig cluster to use"),
@@ -89,11 +70,6 @@ var (
 	authInfoNameField = field.StringField(
 		FlagAuthInfoName,
 		field.WithDescription("The name of the kubeconfig user to use"),
-		field.WithRequired(false),
-	)
-	namespaceField = field.StringField(
-		FlagNamespace,
-		field.WithDescription("If present, the namespace scope for this CLI request"),
 		field.WithRequired(false),
 	)
 	contextField = field.StringField(
@@ -137,18 +113,14 @@ var (
 // ConfigurationFields lists all connector-specific schema fields.
 var ConfigurationFields = []field.SchemaField{
 	kubeconfigField,
-	cacheDirField,
 	certFileField,
 	keyFileField,
 	bearerTokenField,
 	impersonateField,
 	impersonateUIDField,
 	impersonateGroupField,
-	usernameField,
-	passwordField,
 	clusterNameField,
 	authInfoNameField,
-	namespaceField,
 	contextField,
 	apiServerField,
 	tlsServerNameField,
@@ -162,10 +134,6 @@ var ConfigurationFields = []field.SchemaField{
 var ConfigRelations = []field.SchemaFieldRelationship{
 	// --- Mutually Exclusive Authentication Methods ---
 
-	// Token vs. Basic Auth (Username/Password)
-	field.FieldsMutuallyExclusive(bearerTokenField, usernameField),
-	field.FieldsMutuallyExclusive(bearerTokenField, passwordField),
-
 	// Token vs. Cert Auth (Cert/Key)
 	field.FieldsMutuallyExclusive(bearerTokenField, certFileField),
 	field.FieldsMutuallyExclusive(bearerTokenField, keyFileField),
@@ -173,24 +141,11 @@ var ConfigRelations = []field.SchemaFieldRelationship{
 	// Token vs. Impersonation
 	field.FieldsMutuallyExclusive(bearerTokenField, impersonateField),
 
-	// Basic Auth vs. Cert Auth
-	field.FieldsMutuallyExclusive(usernameField, certFileField),
-	field.FieldsMutuallyExclusive(usernameField, keyFileField),
-	field.FieldsMutuallyExclusive(passwordField, certFileField),
-	field.FieldsMutuallyExclusive(passwordField, keyFileField),
-
-	// Basic Auth vs. Impersonation
-	field.FieldsMutuallyExclusive(usernameField, impersonateField),
-	field.FieldsMutuallyExclusive(passwordField, impersonateField),
-
 	// Cert Auth vs. Impersonation
 	field.FieldsMutuallyExclusive(certFileField, impersonateField),
 	field.FieldsMutuallyExclusive(keyFileField, impersonateField),
 
 	// --- Required Together ---
-
-	// Username and Password must be provided together
-	field.FieldsRequiredTogether(usernameField, passwordField),
 
 	// Client Certificate and Key must be provided together
 	field.FieldsRequiredTogether(certFileField, keyFileField),

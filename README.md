@@ -19,7 +19,7 @@ baton resources
 ## docker
 
 ```
-docker run --rm -v $(pwd):/out -e BATON_DOMAIN_URL=domain_url -e BATON_API_KEY=apiKey -e BATON_USERNAME=username ghcr.io/conductorone/baton-kubernetes:latest -f "/out/sync.c1z"
+docker run --rm -v $(pwd):/out -v ~/.kube/config:/kubeconfig:ro -e BATON_KUBECONFIG=/kubeconfig ghcr.io/conductorone/baton-kubernetes:latest -f "/out/sync.c1z"
 docker run --rm -v $(pwd):/out ghcr.io/conductorone/baton:latest -f "/out/sync.c1z" resources
 ```
 

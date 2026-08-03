@@ -98,11 +98,6 @@
       "stringField": {}
     },
     {
-      "name": "cache-dir",
-      "description": "Default cache directory",
-      "stringField": {}
-    },
-    {
       "name": "client-certificate",
       "description": "Path to a client certificate file for TLS",
       "stringField": {
@@ -146,21 +141,6 @@
       }
     },
     {
-      "name": "username",
-      "description": "Username for basic authentication to the API server",
-      "stringField": {
-        "rules": {}
-      }
-    },
-    {
-      "name": "password",
-      "description": "Password for basic authentication to the API server",
-      "isSecret": true,
-      "stringField": {
-        "rules": {}
-      }
-    },
-    {
       "name": "cluster",
       "description": "The name of the kubeconfig cluster to use",
       "stringField": {
@@ -170,13 +150,6 @@
     {
       "name": "user",
       "description": "The name of the kubeconfig user to use",
-      "stringField": {
-        "rules": {}
-      }
-    },
-    {
-      "name": "namespace",
-      "description": "If present, the namespace scope for this CLI request",
       "stringField": {
         "rules": {}
       }
@@ -232,20 +205,6 @@
       "kind": "CONSTRAINT_KIND_MUTUALLY_EXCLUSIVE",
       "fieldNames": [
         "token",
-        "username"
-      ]
-    },
-    {
-      "kind": "CONSTRAINT_KIND_MUTUALLY_EXCLUSIVE",
-      "fieldNames": [
-        "token",
-        "password"
-      ]
-    },
-    {
-      "kind": "CONSTRAINT_KIND_MUTUALLY_EXCLUSIVE",
-      "fieldNames": [
-        "token",
         "client-certificate"
       ]
     },
@@ -260,48 +219,6 @@
       "kind": "CONSTRAINT_KIND_MUTUALLY_EXCLUSIVE",
       "fieldNames": [
         "token",
-        "as"
-      ]
-    },
-    {
-      "kind": "CONSTRAINT_KIND_MUTUALLY_EXCLUSIVE",
-      "fieldNames": [
-        "username",
-        "client-certificate"
-      ]
-    },
-    {
-      "kind": "CONSTRAINT_KIND_MUTUALLY_EXCLUSIVE",
-      "fieldNames": [
-        "username",
-        "client-key"
-      ]
-    },
-    {
-      "kind": "CONSTRAINT_KIND_MUTUALLY_EXCLUSIVE",
-      "fieldNames": [
-        "password",
-        "client-certificate"
-      ]
-    },
-    {
-      "kind": "CONSTRAINT_KIND_MUTUALLY_EXCLUSIVE",
-      "fieldNames": [
-        "password",
-        "client-key"
-      ]
-    },
-    {
-      "kind": "CONSTRAINT_KIND_MUTUALLY_EXCLUSIVE",
-      "fieldNames": [
-        "username",
-        "as"
-      ]
-    },
-    {
-      "kind": "CONSTRAINT_KIND_MUTUALLY_EXCLUSIVE",
-      "fieldNames": [
-        "password",
         "as"
       ]
     },
@@ -317,13 +234,6 @@
       "fieldNames": [
         "client-key",
         "as"
-      ]
-    },
-    {
-      "kind": "CONSTRAINT_KIND_REQUIRED_TOGETHER",
-      "fieldNames": [
-        "username",
-        "password"
       ]
     },
     {

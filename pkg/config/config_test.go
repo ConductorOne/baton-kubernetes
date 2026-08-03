@@ -10,18 +10,14 @@ import (
 func TestConfigurationFields(t *testing.T) {
 	want := []string{
 		config.FlagKubeconfig,
-		config.FlagCacheDir,
 		config.FlagCertFile,
 		config.FlagKeyFile,
 		config.FlagBearerToken,
 		config.FlagImpersonate,
 		config.FlagImpersonateUID,
 		config.FlagImpersonateGroup,
-		config.FlagUsername,
-		config.FlagPassword,
 		config.FlagClusterName,
 		config.FlagAuthInfoName,
-		config.FlagNamespace,
 		config.FlagContext,
 		config.FlagAPIServer,
 		config.FlagTLSServerName,

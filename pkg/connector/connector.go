@@ -7,19 +7,19 @@ import (
 	"path/filepath"
 	"sync"
 
+	pkgconfig "github.com/conductorone/baton-kubernetes/pkg/config"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/connectorbuilder"
 	"github.com/conductorone/baton-sdk/pkg/uhttp"
-	pkgconfig "github.com/conductorone/baton-kubernetes/pkg/config"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"go.uber.org/zap"
 	rbacv1 "k8s.io/api/rbac/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	clioptions "k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
-	clioptions "k8s.io/cli-runtime/pkg/genericclioptions"
 	pointer "k8s.io/utils/ptr"
 )
 
@@ -150,9 +150,6 @@ func NewFromConfig(ctx context.Context, cfg *pkgconfig.Kubernetes, syncResourceT
 	}
 
 	// --- Populate ConfigFlags from typed struct (zero-value guards replace v.IsSet) ---
-	if cfg.CacheDir != "" {
-		opt.CacheDir = pointer.To(cfg.CacheDir)
-	}
 	if cfg.ClientCertificate != "" {
 		opt.CertFile = pointer.To(cfg.ClientCertificate)
 	}
@@ -171,20 +168,11 @@ func NewFromConfig(ctx context.Context, cfg *pkgconfig.Kubernetes, syncResourceT
 	if len(cfg.AsGroup) > 0 {
 		opt.ImpersonateGroup = &cfg.AsGroup
 	}
-	if cfg.Username != "" {
-		opt.Username = pointer.To(cfg.Username)
-	}
-	if cfg.Password != "" {
-		opt.Password = pointer.To(cfg.Password)
-	}
 	if cfg.Cluster != "" {
 		opt.ClusterName = pointer.To(cfg.Cluster)
 	}
 	if cfg.User != "" {
 		opt.AuthInfoName = pointer.To(cfg.User)
-	}
-	if cfg.Namespace != "" {
-		opt.Namespace = pointer.To(cfg.Namespace)
 	}
 	if cfg.Context != "" {
 		opt.Context = pointer.To(cfg.Context)
