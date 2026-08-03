@@ -238,3 +238,29 @@ func TestKubeUserBuilderPhase3SecretsListForbidden(t *testing.T) {
 	assert.Empty(t, result.Usernames)
 	assert.Empty(t, result.GroupMembers)
 }
+
+// TestKubeUserBuilderPhase3SecretsListTransientError verifies that a non-permission
+// secrets-list failure is returned rather than silently sealing an incomplete
+// membership result. Only Forbidden/Unauthorized degrade gracefully.
+func TestKubeUserBuilderPhase3SecretsListTransientError(t *testing.T) {
+	fakeClient := fake.NewSimpleClientset()
+	fakeClient.PrependReactor("list", "secrets", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, k8serrors.NewInternalError(fmt.Errorf("apiserver is having a bad day"))
+	})
+
+	k8s := &Kubernetes{client: fakeClient}
+	builder := newKubeUserBuilder(fakeClient, k8s)
+
+	phaseToken, err := marshalPhaseToken(phaseSecrets, "")
+	require.NoError(t, err)
+
+	_, _, _, err = builder.List(context.Background(), nil, &pagination.Token{Token: phaseToken})
+
+	require.Error(t, err, "a transient secrets-list failure must surface, not be swallowed")
+	assert.Contains(t, err.Error(), "failed to list secrets")
+
+	k8s.secretsMu.Lock()
+	result := k8s.secretsResult
+	k8s.secretsMu.Unlock()
+	assert.Nil(t, result, "an incomplete result must not be sealed on a real failure")
+}

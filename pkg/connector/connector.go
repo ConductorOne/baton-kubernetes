@@ -237,7 +237,7 @@ func NewFromConfig(ctx context.Context, cfg *pkgconfig.Kubernetes, syncResourceT
 		syncResources = syncResources[:0]
 		for _, id := range syncResourceTypes {
 			if !knownTypes[id] {
-				ctxzap.Extract(ctx).Warn("ignoring unknown resource type in sync-resource-types", zap.String("resource_type", id))
+				ctxzap.Extract(ctx).Debug("ignoring unknown resource type in sync-resource-types", zap.String("resource_type", id))
 				continue
 			}
 			if seen[id] {

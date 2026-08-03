@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
@@ -168,12 +169,17 @@ func (k *kubeUserBuilder) List(ctx context.Context, parentResourceID *v2.Resourc
 		l.Debug("fetching secrets page", zap.String("continue_token", continueToken))
 		resp, err := k.client.CoreV1().Secrets("").List(ctx, opts)
 		if err != nil {
-			// Phase 3 is a best-effort x509 discovery pass. Listing secrets
+			// Phase 3 is a best-effort x509 discovery pass, and listing secrets
 			// cluster-wide is a privilege many read-only service accounts
-			// deliberately lack; that must not fail the mandatory user sync.
+			// deliberately lack — that must not fail the mandatory user sync.
+			// Any other failure (transient 5xx, network error) is real: returning
+			// it avoids silently sealing an incomplete membership result.
+			if !k8serrors.IsForbidden(err) && !k8serrors.IsUnauthorized(err) {
+				return nil, "", nil, fmt.Errorf("failed to list secrets: %w", err)
+			}
 			// Seal whatever has been accumulated so kubeGroupBuilder.Grants
 			// still has a (possibly empty) result to read.
-			l.Warn("skipping cert-based user discovery: cannot list secrets", zap.Error(err))
+			l.Debug("skipping cert-based user discovery: not permitted to list secrets", zap.Error(err))
 			k.k8s.secretsMu.Lock()
 			k.k8s.secretsResult = k.k8s.secretsAccumulator
 			k.k8s.secretsAccumulator = nil
