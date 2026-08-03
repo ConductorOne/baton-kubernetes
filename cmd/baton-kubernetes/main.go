@@ -5,14 +5,14 @@ import (
 	"fmt"
 	"os"
 
+	pkgconfig "github.com/conductorone/baton-kubernetes/pkg/config"
 	"github.com/conductorone/baton-kubernetes/pkg/connector"
-	"github.com/conductorone/baton-sdk/pkg/config"
+	sdkconfig "github.com/conductorone/baton-sdk/pkg/config"
 	"github.com/conductorone/baton-sdk/pkg/connectorbuilder"
-	"github.com/conductorone/baton-sdk/pkg/field"
+	"github.com/conductorone/baton-sdk/pkg/connectorrunner"
 	"github.com/conductorone/baton-sdk/pkg/types"
-	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
+	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-	"go.uber.org/zap"
 )
 
 var version = "dev"
@@ -20,14 +20,28 @@ var version = "dev"
 func main() {
 	ctx := context.Background()
 
-	_, cmd, err := config.DefineConfiguration(
+	// The SDK's built-in --sync-resource-types flag is not part of the connector
+	// schema struct, so it is read from viper at connector construction time.
+	var v *viper.Viper
+	getConnector := func(ctx context.Context, cfg *pkgconfig.Kubernetes) (types.ConnectorServer, error) {
+		k, err := connector.NewFromConfig(ctx, cfg, v.GetStringSlice("sync-resource-types"))
+		if err != nil {
+			return nil, err
+		}
+		return connectorbuilder.NewConnector(ctx, k)
+	}
+
+	var cmd *cobra.Command
+	var err error
+	v, cmd, err = sdkconfig.DefineConfiguration(
 		ctx,
 		"baton-kubernetes",
 		getConnector,
-		field.Configuration{
-			Fields:      getConfigurationFields(),
-			Constraints: getFieldRelationships(),
-		},
+		pkgconfig.Configuration,
+		// The capabilities sub-command uses a client-free builder that declares
+		// every resource type, so the generated manifest is complete even though
+		// the default sync registers only the core RBAC types.
+		connectorrunner.WithDefaultCapabilitiesConnectorBuilder(connector.DefaultCapabilitiesBuilder()),
 	)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err.Error())
@@ -41,35 +55,4 @@ func main() {
 		fmt.Fprintln(os.Stderr, err.Error())
 		os.Exit(1)
 	}
-}
-
-func getConnector(ctx context.Context, v *viper.Viper) (types.ConnectorServer, error) {
-	l := ctxzap.Extract(ctx)
-	opt, err := GetConfig(v)
-	if err != nil {
-		return nil, err
-	}
-	restConfig, err := opt.ToRESTConfig()
-	if err != nil {
-		l.Error("error creating rest config", zap.Error(err))
-		return nil, fmt.Errorf("failed to create Kubernetes REST config: %w. Ensure you have a valid kubeconfig file or in-cluster configuration", err)
-	}
-
-	// Verify that the REST config isn't nil
-	if restConfig == nil {
-		l.Error("unexpectedly got nil REST config")
-		return nil, fmt.Errorf("failed to create Kubernetes REST config: unexpectedly got nil config")
-	}
-
-	cb, err := connector.New(ctx, restConfig)
-	if err != nil {
-		l.Error("error creating connector", zap.Error(err))
-		return nil, err
-	}
-	connector, err := connectorbuilder.NewConnector(ctx, cb)
-	if err != nil {
-		l.Error("error creating connector", zap.Error(err))
-		return nil, err
-	}
-	return connector, nil
 }

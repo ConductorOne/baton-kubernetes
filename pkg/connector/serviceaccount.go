@@ -92,12 +92,12 @@ func (s *serviceAccountBuilder) List(ctx context.Context, parentResourceID *v2.R
 func serviceAccountResource(serviceAccount *corev1.ServiceAccount) (*v2.Resource, error) {
 	// Prepare profile with standard metadata
 	profile := map[string]interface{}{
-		"name":              serviceAccount.Name,
-		"namespace":         serviceAccount.Namespace,
-		"uid":               string(serviceAccount.UID),
-		"creationTimestamp": serviceAccount.CreationTimestamp.String(),
-		"labels":            StringMapToAnyMap(serviceAccount.Labels),
-		"annotations":       StringMapToAnyMap(serviceAccount.Annotations),
+		profileKeyName:              serviceAccount.Name,
+		profileKeyNamespace:         serviceAccount.Namespace,
+		profileKeyUID:               string(serviceAccount.UID),
+		profileKeyCreationTimestamp: FormatTimestamp(serviceAccount.CreationTimestamp),
+		profileKeyLabels:            StringMapToAnyMap(serviceAccount.Labels),
+		profileKeyAnnotations:       AnnotationsToAnyMap(serviceAccount.Annotations),
 	}
 
 	// Add secrets if present
@@ -133,10 +133,10 @@ func serviceAccountResource(serviceAccount *corev1.ServiceAccount) (*v2.Resource
 		ResourceTypeServiceAccount,
 		rawID,
 		[]rs.UserTraitOption{
-			rs.WithUserProfile(profile),
 			rs.WithAccountType(v2.UserTrait_ACCOUNT_TYPE_SERVICE),
 		},
 		rs.WithParentResourceID(parentID),
+		rs.WithResourceProfile(profile),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create service account resource: %w", err)

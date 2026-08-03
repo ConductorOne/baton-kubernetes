@@ -20,13 +20,50 @@ This connector requires network access to your Kubernetes API server. If your cl
 | Kubernetes groups | <Icon icon="square-check" iconType="solid" color="#c937ae"/> | |
 | Roles | <Icon icon="square-check" iconType="solid" color="#c937ae"/> | |
 | Cluster roles | <Icon icon="square-check" iconType="solid" color="#c937ae"/> | |
-| Nodes | <Icon icon="square-check" iconType="solid" color="#c937ae"/> | |
-| Pods | <Icon icon="square-check" iconType="solid" color="#c937ae"/> | |
-| Deployments | <Icon icon="square-check" iconType="solid" color="#c937ae"/> | |
-| StatefulSets | <Icon icon="square-check" iconType="solid" color="#c937ae"/> | |
-| DaemonSets | <Icon icon="square-check" iconType="solid" color="#c937ae"/> | |
-| Secrets | <Icon icon="square-check" iconType="solid" color="#c937ae"/> | |
-| ConfigMaps | <Icon icon="square-check" iconType="solid" color="#c937ae"/> | |
+| Nodes | Opt-in | |
+| Pods | Opt-in | |
+| Deployments | Opt-in | |
+| StatefulSets | Opt-in | |
+| DaemonSets | Opt-in | |
+| Secrets | Opt-in | |
+| ConfigMaps | Opt-in | |
+
+<Note>
+Workload and configuration resource types (Nodes, Pods, Deployments, StatefulSets, DaemonSets, Secrets, ConfigMaps) are excluded from the default sync. To include them, pass the full set of resource type IDs to sync with the standard `--sync-resource-types` flag (or the `BATON_SYNC_RESOURCE_TYPES` environment variable). An explicit selection replaces the default set, so list every type you want. For example:
+
+```
+baton-kubernetes --sync-resource-types namespace,service_account,role,cluster_role,kube_user,kube_group,pod,node
+```
+</Note>
+
+## Understanding Kubernetes identity
+
+Kubernetes does not have a built-in user store. Identity is determined at authentication time by the method used to connect to the API server:
+
+- **x509 client certificates** — The certificate's `CN=` field is the username; `O=` fields are group memberships.
+- **Service account tokens** — Bound to a namespace; group is always `system:serviceaccounts:<namespace>`.
+- **OIDC tokens** — Username and groups come from JWT claims configured on the API server.
+- **Webhook authenticators** — Username and groups are returned by an external service.
+- **Bearer tokens** — Used for service accounts and bootstrap tokens.
+
+Access control is defined through RBAC: Roles and ClusterRoles define permissions, and RoleBindings and ClusterRoleBindings assign those permissions to users, groups, or service accounts.
+
+## Group membership limitations
+
+Kubernetes group membership is not a native API object. Groups only exist as claims inside authentication credentials and are never persisted in the cluster. The connector can discover group membership for one authentication method only:
+
+**x509 client certificates stored in kubeconfig Secrets** — when a Secret contains a kubeconfig with embedded `client-certificate-data`, the connector parses the certificate's `O=` (Organization) fields as group names and emits `kube_group:<group>:member → kube_user:<cn>` grants.
+
+The following authentication methods are **not supported** for group membership discovery:
+
+| Auth method | Why membership is invisible |
+| :--- | :--- |
+| OIDC / OAuth2 | Group claims live in the ID token issued at login time; the cluster never stores them |
+| Webhook authenticators | Group assignment happens outside the cluster at auth time |
+| Bootstrap tokens | No persistent user or group identity |
+| In-cluster service account tokens | Group is always `system:serviceaccounts:<namespace>`, inferred from the token's namespace |
+
+**What this means for access reviews:** RBAC bindings to groups are fully visible. If `ClusterRole:admin` is bound to group `developers`, that grant is synced. However, the list of users in `developers` is only complete if those users authenticate via x509 client certificates whose kubeconfigs are stored as Secrets in the cluster. Users authenticating via OIDC or webhook will appear as grant targets on Roles and ClusterRoles if they have direct bindings, but not as members of their groups.
 
 ## Before you begin
 

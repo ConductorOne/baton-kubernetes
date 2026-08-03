@@ -15,18 +15,17 @@ import (
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"go.uber.org/zap"
-	"google.golang.org/protobuf/types/known/structpb"
 )
 
 // Standard verb entitlements for Kubernetes resources.
 var standardResourceVerbs = []string{
-	"get",
-	"list",
-	"watch",
-	"create",
-	"update",
-	"patch",
-	"delete",
+	verbGet,
+	verbList,
+	verbWatch,
+	verbCreate,
+	verbUpdate,
+	verbPatch,
+	verbDelete,
 }
 
 // secretBuilder syncs Kubernetes Secrets as Baton resources.
@@ -110,34 +109,21 @@ func secretResource(secret *corev1.Secret) (*v2.Resource, error) {
 
 	// Create profile with standard metadata
 	profile := map[string]interface{}{
-		"name":              secret.Name,
-		"namespace":         secret.Namespace,
-		"uid":               string(secret.UID),
-		"creationTimestamp": secret.CreationTimestamp.String(),
-		"labels":            StringMapToAnyMap(secret.Labels),
-		"annotations":       StringMapToAnyMap(secret.Annotations),
-		"type":              string(secret.Type),
-	}
-
-	// Secret trait options
-	secretOptions := []rs.SecretTraitOption{
-		// Set creation time from metadata
-		rs.WithSecretCreatedAt(secret.CreationTimestamp.Time),
-		// Create a custom trait option for the profile
-		func(t *v2.SecretTrait) error {
-			profileStruct, err := structpb.NewStruct(profile)
-			if err != nil {
-				return err
-			}
-			t.Profile = profileStruct
-			return nil
-		},
+		profileKeyName:              secret.Name,
+		profileKeyNamespace:         secret.Namespace,
+		profileKeyUID:               string(secret.UID),
+		profileKeyCreationTimestamp: FormatTimestamp(secret.CreationTimestamp),
+		profileKeyLabels:            StringMapToAnyMap(secret.Labels),
+		profileKeyAnnotations:       AnnotationsToAnyMap(secret.Annotations),
+		"type":                      string(secret.Type),
 	}
 
 	// Resource options
 	options := []rs.ResourceOption{
 		rs.WithParentResourceID(parentID),
 		rs.WithDescription(fmt.Sprintf("Secret of type %s in namespace %s", secret.Type, secret.Namespace)),
+		rs.WithResourceCreatedAt(secret.CreationTimestamp.Time),
+		rs.WithResourceProfile(profile),
 	}
 
 	// Add external ID if available
@@ -150,7 +136,7 @@ func secretResource(secret *corev1.Secret) (*v2.Resource, error) {
 		secret.Name,
 		ResourceTypeSecret,
 		resourceID,
-		secretOptions,
+		nil,
 		options...,
 	)
 	if err != nil {

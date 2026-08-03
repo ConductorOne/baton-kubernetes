@@ -44,6 +44,15 @@ func (c *clusterRoleBuilder) List(ctx context.Context, parentResourceID *v2.Reso
 	// Initialize empty resource slice
 	var rv []*v2.Resource
 
+	// An empty page token marks the start of a new sync. Drop the shared
+	// binding caches so this sync's grants reflect current cluster state
+	// rather than whatever the first sync of this process observed.
+	if pToken.Token == "" && c.bindingProvider != nil {
+		if k8s, ok := c.bindingProvider.(*Kubernetes); ok {
+			k8s.invalidateBindingsCaches()
+		}
+	}
+
 	// Parse pagination token
 	bag, err := ParsePageToken(pToken.Token)
 	if err != nil {
@@ -88,11 +97,18 @@ func (c *clusterRoleBuilder) List(ctx context.Context, parentResourceID *v2.Reso
 func clusterRoleResource(clusterRole *rbacv1.ClusterRole) (*v2.Resource, error) {
 	// Prepare profile with standard metadata
 	profile := map[string]interface{}{
-		"name":              clusterRole.Name,
-		"uid":               string(clusterRole.UID),
-		"creationTimestamp": clusterRole.CreationTimestamp.String(),
-		"labels":            StringMapToAnyMap(clusterRole.Labels),
-		"annotations":       StringMapToAnyMap(clusterRole.Annotations),
+		profileKeyName:              clusterRole.Name,
+		profileKeyUID:               string(clusterRole.UID),
+		profileKeyCreationTimestamp: FormatTimestamp(clusterRole.CreationTimestamp),
+		profileKeyLabels:            StringMapToAnyMap(clusterRole.Labels),
+		profileKeyAnnotations:       AnnotationsToAnyMap(clusterRole.Annotations),
+	}
+
+	// The rules are what the cluster role actually permits. For aggregated cluster
+	// roles the API server's aggregation controller has already written the
+	// effective rules into the object, so this is the resolved permission set.
+	for k, v := range PolicyRulesProfile(clusterRole.Rules) {
+		profile[k] = v
 	}
 
 	// Add aggregation rule if present
@@ -102,6 +118,8 @@ func clusterRoleResource(clusterRole *rbacv1.ClusterRole) (*v2.Resource, error) 
 			return nil, fmt.Errorf("failed to marshal aggregation rule: %w", err)
 		}
 		profile["aggregationRule"] = agRule
+		// Records that the rules above were computed from the selector, not authored directly.
+		profile[profileKeyAggregated] = true
 	}
 
 	// Create resource as a role - pass the name directly as the raw ID
@@ -109,7 +127,8 @@ func clusterRoleResource(clusterRole *rbacv1.ClusterRole) (*v2.Resource, error) 
 		clusterRole.Name,
 		ResourceTypeClusterRole,
 		clusterRole.Name, // Pass the name directly as the object ID
-		[]rs.RoleTraitOption{rs.WithRoleProfile(profile)},
+		nil,
+		rs.WithResourceProfile(profile),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create cluster role resource: %w", err)
@@ -203,6 +222,11 @@ func (c *clusterRoleBuilder) Grants(ctx context.Context, resource *v2.Resource, 
 		namespace := binding.Namespace
 		// Process each subject in the binding
 		for _, subject := range binding.Subjects {
+			// A ServiceAccount subject may omit its namespace, in which case
+			// Kubernetes resolves it to the binding's namespace.
+			if subject.Kind == SubjectKindServiceAccount && subject.Namespace == "" {
+				subject.Namespace = binding.Namespace
+			}
 			entName := fmt.Sprintf("%s:%s", namespace, "member")
 			subjectGrant, err := GrantRoleToSubject(subject, resource, entName)
 			if err != nil {

@@ -17,32 +17,50 @@
     {
       "resourceType": {
         "id": "configmap",
-        "displayName": "Config Map"
+        "displayName": "Config Map",
+        "annotations": [
+          {
+            "@type": "type.googleapis.com/c1.connector.v2.OptInRequired"
+          }
+        ]
       },
       "capabilities": [
         "CAPABILITY_SYNC"
       ],
-      "permissions": {}
+      "permissions": {},
+      "optInRequired": true
     },
     {
       "resourceType": {
         "id": "daemonset",
-        "displayName": "Daemon Set"
+        "displayName": "Daemon Set",
+        "annotations": [
+          {
+            "@type": "type.googleapis.com/c1.connector.v2.OptInRequired"
+          }
+        ]
       },
       "capabilities": [
         "CAPABILITY_SYNC"
       ],
-      "permissions": {}
+      "permissions": {},
+      "optInRequired": true
     },
     {
       "resourceType": {
         "id": "deployment",
-        "displayName": "Deployment"
+        "displayName": "Deployment",
+        "annotations": [
+          {
+            "@type": "type.googleapis.com/c1.connector.v2.OptInRequired"
+          }
+        ]
       },
       "capabilities": [
         "CAPABILITY_SYNC"
       ],
-      "permissions": {}
+      "permissions": {},
+      "optInRequired": true
     },
     {
       "resourceType": {
@@ -83,22 +101,34 @@
     {
       "resourceType": {
         "id": "node",
-        "displayName": "Node"
+        "displayName": "Node",
+        "annotations": [
+          {
+            "@type": "type.googleapis.com/c1.connector.v2.OptInRequired"
+          }
+        ]
       },
       "capabilities": [
         "CAPABILITY_SYNC"
       ],
-      "permissions": {}
+      "permissions": {},
+      "optInRequired": true
     },
     {
       "resourceType": {
         "id": "pod",
-        "displayName": "Pod"
+        "displayName": "Pod",
+        "annotations": [
+          {
+            "@type": "type.googleapis.com/c1.connector.v2.OptInRequired"
+          }
+        ]
       },
       "capabilities": [
         "CAPABILITY_SYNC"
       ],
-      "permissions": {}
+      "permissions": {},
+      "optInRequired": true
     },
     {
       "resourceType": {
@@ -119,12 +149,18 @@
         "displayName": "Secret",
         "traits": [
           "TRAIT_SECRET"
+        ],
+        "annotations": [
+          {
+            "@type": "type.googleapis.com/c1.connector.v2.OptInRequired"
+          }
         ]
       },
       "capabilities": [
         "CAPABILITY_SYNC"
       ],
-      "permissions": {}
+      "permissions": {},
+      "optInRequired": true
     },
     {
       "resourceType": {
@@ -142,12 +178,18 @@
     {
       "resourceType": {
         "id": "statefulset",
-        "displayName": "Stateful Set"
+        "displayName": "Stateful Set",
+        "annotations": [
+          {
+            "@type": "type.googleapis.com/c1.connector.v2.OptInRequired"
+          }
+        ]
       },
       "capabilities": [
         "CAPABILITY_SYNC"
       ],
-      "permissions": {}
+      "permissions": {},
+      "optInRequired": true
     }
   ],
   "connectorCapabilities": [

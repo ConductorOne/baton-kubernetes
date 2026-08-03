@@ -36,6 +36,15 @@ func (r *roleBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId,
 	// Initialize empty resource slice
 	var rv []*v2.Resource
 
+	// An empty page token marks the start of a new sync. Drop the shared
+	// binding caches so this sync's grants reflect current cluster state
+	// rather than whatever the first sync of this process observed.
+	if pToken.Token == "" && r.bindingProvider != nil {
+		if k8s, ok := r.bindingProvider.(*Kubernetes); ok {
+			k8s.invalidateBindingsCaches()
+		}
+	}
+
 	// Parse pagination token
 	bag, err := ParsePageToken(pToken.Token)
 	if err != nil {
@@ -81,18 +90,23 @@ func (r *roleBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId,
 func roleResource(role *rbacv1.Role) (*v2.Resource, error) {
 	// Prepare profile with standard metadata
 	profile := map[string]interface{}{
-		"name":              role.Name,
-		"namespace":         role.Namespace,
-		"uid":               string(role.UID),
-		"creationTimestamp": role.CreationTimestamp.String(),
+		profileKeyName:              role.Name,
+		profileKeyNamespace:         role.Namespace,
+		profileKeyUID:               string(role.UID),
+		profileKeyCreationTimestamp: FormatTimestamp(role.CreationTimestamp),
 	}
 
 	// Only add labels and annotations if they're not nil to avoid proto conversion issues
 	if role.Labels != nil {
-		profile["labels"] = StringMapToAnyMap(role.Labels)
+		profile[profileKeyLabels] = StringMapToAnyMap(role.Labels)
 	}
 	if role.Annotations != nil {
-		profile["annotations"] = StringMapToAnyMap(role.Annotations)
+		profile[profileKeyAnnotations] = AnnotationsToAnyMap(role.Annotations)
+	}
+
+	// The rules are what the role actually permits; reviewers need them to attest access.
+	for k, v := range PolicyRulesProfile(role.Rules) {
+		profile[k] = v
 	}
 
 	// Get parent namespace resource ID
@@ -109,8 +123,9 @@ func roleResource(role *rbacv1.Role) (*v2.Resource, error) {
 		fmt.Sprintf("%s (%s)", role.Name, role.Namespace),
 		ResourceTypeRole,
 		rawID, // Pass the raw ID directly
-		[]rs.RoleTraitOption{rs.WithRoleProfile(profile)},
+		nil,
 		rs.WithParentResourceID(parentID),
+		rs.WithResourceProfile(profile),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create role resource: %w", err)
@@ -181,6 +196,11 @@ func (r *roleBuilder) Grants(ctx context.Context, resource *v2.Resource, _ *pagi
 	for _, binding := range matchingBindings {
 		// Process each subject in the binding
 		for _, subject := range binding.Subjects {
+			// A ServiceAccount subject may omit its namespace, in which case
+			// Kubernetes resolves it to the binding's namespace.
+			if subject.Kind == SubjectKindServiceAccount && subject.Namespace == "" {
+				subject.Namespace = binding.Namespace
+			}
 			subjectGrant, err := GrantRoleToSubject(subject, resource, "member")
 			if err != nil {
 				l.Debug("subject kind not supported", zap.String("subject kind", subject.Kind))
