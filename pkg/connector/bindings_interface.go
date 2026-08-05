@@ -22,3 +22,9 @@ type ClusterRoleBindingProvider interface {
 	// GetMatchingBindingsForClusterRole returns all RoleBindings and ClusterRoleBindings that reference the specified ClusterRole
 	GetMatchingBindingsForClusterRole(ctx context.Context, syncID, clusterRoleName string) ([]rbacv1.RoleBinding, []rbacv1.ClusterRoleBinding, error)
 }
+
+// BindingLister exposes every binding at once, which the role assignment
+// builder needs to group them by (cluster role, scope).
+type BindingLister interface {
+	AllBindings(ctx context.Context, syncID string) ([]rbacv1.RoleBinding, []rbacv1.ClusterRoleBinding, error)
+}

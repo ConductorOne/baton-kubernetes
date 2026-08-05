@@ -24,6 +24,10 @@ const clusterScopedMember = "all:member"
 type clusterRoleBuilder struct {
 	client          kubernetes.Interface
 	bindingProvider ClusterRoleBindingProvider
+	// useRoleAssignments suppresses this builder's entitlements and grants
+	// because the role_assignment type is expressing the same access. The two
+	// models are mutually exclusive; emitting both would double-count it.
+	useRoleAssignments bool
 	// Cached namespaces
 	cachedNamespaces []string
 	nsMutex          sync.Mutex
@@ -128,6 +132,12 @@ func clusterRoleResource(clusterRole *rbacv1.ClusterRole) (*v2.Resource, error) 
 
 // Entitlements returns entitlements for ClusterRole resources.
 func (c *clusterRoleBuilder) Entitlements(ctx context.Context, resource *v2.Resource, _ rs.SyncOpAttrs) ([]*v2.Entitlement, *rs.SyncOpResults, error) {
+	if c.useRoleAssignments {
+		// role_assignment expresses this access instead. Emitting the flat
+		// entitlements too would double-count every cluster role binding.
+		return nil, nil, nil
+	}
+
 	var entitlements []*v2.Entitlement
 
 	// Create the 'all:member' entitlement for the cluster role for cluster level (all namespaces)
@@ -174,6 +184,11 @@ func (c *clusterRoleBuilder) Entitlements(ctx context.Context, resource *v2.Reso
 func (c *clusterRoleBuilder) Grants(ctx context.Context, resource *v2.Resource, opts rs.SyncOpAttrs) ([]*v2.Grant, *rs.SyncOpResults, error) {
 	l := ctxzap.Extract(ctx)
 	var rv []*v2.Grant
+
+	if c.useRoleAssignments {
+		// See Entitlements: role_assignment carries these grants instead.
+		return nil, nil, nil
+	}
 
 	// Extract cluster role name from resource
 	if resource.Id == nil || resource.Id.Resource == "" {
@@ -266,9 +281,10 @@ func (c *clusterRoleBuilder) cacheNamespaces(ctx context.Context) error {
 }
 
 // newClusterRoleBuilder creates a new cluster role builder.
-func newClusterRoleBuilder(client kubernetes.Interface, bindingProvider ClusterRoleBindingProvider) *clusterRoleBuilder {
+func newClusterRoleBuilder(client kubernetes.Interface, bindingProvider ClusterRoleBindingProvider, useRoleAssignments bool) *clusterRoleBuilder {
 	return &clusterRoleBuilder{
-		client:          client,
-		bindingProvider: bindingProvider,
+		client:             client,
+		bindingProvider:    bindingProvider,
+		useRoleAssignments: useRoleAssignments,
 	}
 }

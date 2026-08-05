@@ -43,6 +43,8 @@ const (
 type ConnectorOpts struct {
 	SyncResources []string
 	CustomSyncer  map[string]ResourceSyncerBuilder
+	// UseRoleAssignments switches cluster role access to the sparse model.
+	UseRoleAssignments bool
 }
 
 // ConnectorOption is a function that configures the connector options.
@@ -61,6 +63,23 @@ func WithSyncResources(resources []string) ConnectorOption {
 func WithCustomSyncers(syncers map[string]ResourceSyncerBuilder) ConnectorOption {
 	return func(opts *ConnectorOpts) error {
 		opts.CustomSyncer = syncers
+		return nil
+	}
+}
+
+// WithRoleAssignments switches cluster role access from the flat model to the
+// sparse one: instead of declaring an entitlement per cluster role per
+// namespace, the connector emits one role_assignment resource per
+// (cluster role, scope) pair that actually has a binding.
+//
+// The two are mutually exclusive. With this on, cluster_role stops emitting
+// entitlements and grants, so the same access is never counted twice.
+// Namespaced roles are untouched: a Role can only be bound in its own
+// namespace, so (role, scope) is 1:1 with the Role and the sparse form would
+// produce slightly more objects, not fewer.
+func WithRoleAssignments(enabled bool) ConnectorOption {
+	return func(opts *ConnectorOpts) error {
+		opts.UseRoleAssignments = enabled
 		return nil
 	}
 }
@@ -209,14 +228,23 @@ func NewFromConfig(
 		ResourceTypeKubeUser.Id,
 		ResourceTypeKubeGroup.Id,
 	}
+	// The sparse types are registered only when their flag is on, so leaving it
+	// off keeps the resource set byte-identical to the flat model.
+	if cfg.UseRoleAssignments {
+		syncResources = append(syncResources, SparseResourceTypeIDs...)
+	}
 	if connectorOpts != nil && connectorOpts.SyncFilterIsExplicit() {
 		// Walk the connector's own type list rather than the user's slice: it
 		// filters out ids this connector does not implement and deduplicates in
 		// one step. Both matter — the SDK's env-var binding
 		// (BATON_SYNC_RESOURCE_TYPES) can deliver a value twice, and registering
 		// a duplicate resource type is a hard error in the SDK builder.
+		candidates := AllResourceTypeIDs
+		if cfg.UseRoleAssignments {
+			candidates = append(append([]string{}, AllResourceTypeIDs...), SparseResourceTypeIDs...)
+		}
 		syncResources = syncResources[:0]
-		for _, id := range AllResourceTypeIDs {
+		for _, id := range candidates {
 			if connectorOpts.WillSyncResourceType(id) {
 				syncResources = append(syncResources, id)
 			}
@@ -226,7 +254,10 @@ func NewFromConfig(
 		}
 	}
 
-	k, err := New(ctx, restConfig, WithSyncResources(syncResources))
+	k, err := New(ctx, restConfig,
+		WithSyncResources(syncResources),
+		WithRoleAssignments(cfg.UseRoleAssignments),
+	)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -315,7 +346,13 @@ func (k *Kubernetes) ResourceSyncers(ctx context.Context) []connectorbuilder.Res
 			return newRoleBuilder(k.client, k)
 		},
 		ResourceTypeClusterRole.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncerV2 {
-			return newClusterRoleBuilder(k.client, k)
+			return newClusterRoleBuilder(k.client, k, k.opts.UseRoleAssignments)
+		},
+		ResourceTypeCluster.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncerV2 {
+			return newClusterBuilder(k.config.Host)
+		},
+		ResourceTypeRoleAssignment.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncerV2 {
+			return newRoleAssignmentBuilder(k.client, k)
 		},
 		ResourceTypeSecret.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncerV2 {
 			return newSecretBuilder(k.client)
@@ -413,7 +450,9 @@ func (d *defaultCapabilitiesBuilder) ResourceSyncers(_ context.Context) []connec
 		newNamespaceBuilder(nil),
 		newServiceAccountBuilder(nil),
 		newRoleBuilder(nil, nil),
-		newClusterRoleBuilder(nil, nil),
+		newClusterRoleBuilder(nil, nil, false),
+		newClusterBuilder(""),
+		newRoleAssignmentBuilder(nil, nil),
 		newKubeUserBuilder(nil),
 		newKubeGroupBuilder(nil),
 		newConfigMapBuilder(nil),
@@ -542,6 +581,31 @@ func (k *Kubernetes) loadBindingsCaches(ctx context.Context, syncID string) erro
 		zap.Int("clusterRoleBindings", len(allClusterRoleBindings)))
 
 	return nil
+}
+
+// AllBindings returns every RoleBinding and ClusterRoleBinding in the cluster,
+// loading the shared cache for this sync if needed.
+//
+// The role assignment builder needs the whole set at once because it groups
+// bindings by (cluster role, scope): a pair is only complete once every binding
+// contributing to it has been seen, so it cannot be assembled from the
+// per-role lookups the other builders use.
+func (k *Kubernetes) AllBindings(ctx context.Context, syncID string) ([]rbacv1.RoleBinding, []rbacv1.ClusterRoleBinding, error) {
+	if err := k.loadBindingsCaches(ctx, syncID); err != nil {
+		return nil, nil, fmt.Errorf("failed to load bindings cache: %w", err)
+	}
+
+	k.bindingsMutex.RLock()
+	defer k.bindingsMutex.RUnlock()
+
+	// Copy: callers must not observe later mutation of the cache, and the caller
+	// here outlives the read lock.
+	roleBindings := make([]rbacv1.RoleBinding, len(k.roleBindingsCache))
+	copy(roleBindings, k.roleBindingsCache)
+	clusterRoleBindings := make([]rbacv1.ClusterRoleBinding, len(k.clusterRoleBindingsCache))
+	copy(clusterRoleBindings, k.clusterRoleBindingsCache)
+
+	return roleBindings, clusterRoleBindings, nil
 }
 
 // GetMatchingRoleBindings returns all RoleBindings that reference the specified Role.

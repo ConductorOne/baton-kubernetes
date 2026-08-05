@@ -12,6 +12,13 @@ func optInAnnotations() annotations.Annotations {
 	return annotations.New(&v2.OptInRequired{})
 }
 
+// roleAssignmentAnnotations marks the sparse cluster role assignment type.
+// SkipEntitlements is what makes it sparse: the type declares one shared
+// entitlement through StaticEntitlements rather than one per resource.
+func roleAssignmentAnnotations() annotations.Annotations {
+	return annotations.New(&v2.OptInRequired{}, &v2.SkipEntitlements{})
+}
+
 // Resource type definitions.
 var (
 	ResourceTypeNamespace      = &v2.ResourceType{Id: profileKeyNamespace, DisplayName: "Namespace"}
@@ -27,13 +34,49 @@ var (
 	ResourceTypeDaemonSet      = &v2.ResourceType{Id: "daemonset", DisplayName: "Daemon Set", Annotations: optInAnnotations()}
 	ResourceTypeKubeUser       = &v2.ResourceType{Id: "kube_user", DisplayName: "Kubernetes User", Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_USER}}
 	ResourceTypeKubeGroup      = &v2.ResourceType{Id: "kube_group", DisplayName: "Kubernetes Group", Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_GROUP}}
-	ResourceTypeBinding        = &v2.ResourceType{Id: "binding", DisplayName: "Binding", Description: "Internal type for processing RBAC bindings"}
-	ResourceTypeUser           = &v2.ResourceType{Id: "user", DisplayName: SubjectTypeUser, Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_USER}}
-	ResourceTypeGroup          = &v2.ResourceType{Id: "group", DisplayName: SubjectTypeGroup, Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_GROUP}}
+	// ResourceTypeCluster is a singleton standing for the cluster itself. It
+	// exists so a ClusterRoleBinding has a scope resource to point at: C1 drops a
+	// role-scope-binding relationship whose scope resource was never synced.
+	// It carries no trait, deliberately — a role or group trait here would count
+	// the cluster as classic access in C1's access-model derivation.
+	ResourceTypeCluster = &v2.ResourceType{
+		Id:          "cluster",
+		DisplayName: "Cluster",
+		Annotations: annotations.New(&v2.OptInRequired{}, &v2.SkipEntitlementsAndGrants{}),
+	}
+	// ResourceTypeRoleAssignment is one (cluster role, scope) pair that actually
+	// has a binding. Named neutrally so namespaced Roles can fold in later
+	// without a new type or a second platform opt-in.
+	ResourceTypeRoleAssignment = &v2.ResourceType{
+		Id:          "role_assignment",
+		DisplayName: "Role Assignment",
+		Traits:      []v2.ResourceType_Trait{v2.ResourceType_TRAIT_SCOPE_BINDING},
+		Annotations: roleAssignmentAnnotations(),
+	}
+	ResourceTypeBinding = &v2.ResourceType{Id: "binding", DisplayName: "Binding", Description: "Internal type for processing RBAC bindings"}
+	ResourceTypeUser    = &v2.ResourceType{Id: "user", DisplayName: SubjectTypeUser, Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_USER}}
+	ResourceTypeGroup   = &v2.ResourceType{Id: "group", DisplayName: SubjectTypeGroup, Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_GROUP}}
 )
 
-// AllResourceTypeIDs lists every resource type this connector can sync,
-// including the opt-in workload/configuration types.
+// SparseResourceTypeIDs lists the types registered only when
+// --use-role-assignments is set. They replace the cluster_role entitlement and
+// grant surface rather than adding to it.
+var SparseResourceTypeIDs = []string{
+	ResourceTypeCluster.Id,
+	ResourceTypeRoleAssignment.Id,
+}
+
+// DeclaredResourceTypeIDs is every type the connector can ever emit, in either
+// model. It is what the capabilities manifest declares, so the manifest stays
+// complete regardless of how a deployment is configured.
+func DeclaredResourceTypeIDs() []string {
+	return append(append([]string{}, AllResourceTypeIDs...), SparseResourceTypeIDs...)
+}
+
+// AllResourceTypeIDs lists the resource types the flat model can sync,
+// including the opt-in workload/configuration types. The sparse types are
+// deliberately excluded: they are only registered when --use-role-assignments
+// is set, so --sync-resource-types must not be able to select them on their own.
 var AllResourceTypeIDs = []string{
 	ResourceTypeNamespace.Id,
 	ResourceTypeServiceAccount.Id,

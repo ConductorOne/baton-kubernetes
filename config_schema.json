@@ -198,6 +198,12 @@
       "name": "disable-compression",
       "description": "If true, opt-out of response compression for all requests to the server",
       "boolField": {}
+    },
+    {
+      "name": "use-role-assignments",
+      "displayName": "Sync cluster role assignments",
+      "description": "If true, sync each (cluster role, scope) pair that has a binding as a role assignment resource, instead of declaring one entitlement per cluster role per namespace. Namespaced roles are unaffected.",
+      "boolField": {}
     }
   ],
   "constraints": [

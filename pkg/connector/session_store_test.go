@@ -6,6 +6,7 @@ import (
 	"maps"
 	"sync"
 
+	"github.com/conductorone/baton-sdk/pkg/pagination"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
 	"github.com/conductorone/baton-sdk/pkg/types/sessions"
 )
@@ -118,4 +119,14 @@ func (m *memorySessionStore) GetAll(_ context.Context, _ string, _ ...sessions.S
 	out := make(map[string][]byte, len(m.data))
 	maps.Copy(out, m.data)
 	return out, "", nil
+}
+
+// paginationToken builds a SyncOpAttrs page token for tests.
+func paginationToken(token string) pagination.Token {
+	return pagination.Token{Token: token}
+}
+
+// paginationTokenWithSize sets the page size too, for tests that page.
+func paginationTokenWithSize(token string, size int) pagination.Token {
+	return pagination.Token{Token: token, Size: size}
 }
