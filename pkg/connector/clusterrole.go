@@ -11,8 +11,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
-	"github.com/conductorone/baton-sdk/pkg/annotations"
-	"github.com/conductorone/baton-sdk/pkg/pagination"
 	"github.com/conductorone/baton-sdk/pkg/types/entitlement"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
@@ -38,38 +36,29 @@ func (c *clusterRoleBuilder) ResourceType(ctx context.Context) *v2.ResourceType 
 }
 
 // List fetches all ClusterRoles from the Kubernetes API.
-func (c *clusterRoleBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, pToken *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
+func (c *clusterRoleBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, opts rs.SyncOpAttrs) ([]*v2.Resource, *rs.SyncOpResults, error) {
 	l := ctxzap.Extract(ctx)
 
 	// Initialize empty resource slice
 	var rv []*v2.Resource
 
-	// An empty page token marks the start of a new sync. Drop the shared
-	// binding caches so this sync's grants reflect current cluster state
-	// rather than whatever the first sync of this process observed.
-	if pToken.Token == "" && c.bindingProvider != nil {
-		if k8s, ok := c.bindingProvider.(*Kubernetes); ok {
-			k8s.invalidateBindingsCaches()
-		}
-	}
-
 	// Parse pagination token
-	bag, err := ParsePageToken(pToken.Token)
+	bag, err := ParsePageToken(opts.PageToken.Token)
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("failed to parse page token: %w", err)
+		return nil, nil, fmt.Errorf("failed to parse page token: %w", err)
 	}
 
 	// Set up list options with pagination
-	opts := metav1.ListOptions{
+	listOpts := metav1.ListOptions{
 		Limit:    ResourcesPageSize,
 		Continue: bag.PageToken(),
 	}
 
 	// Fetch cluster roles from the Kubernetes API
-	l.Debug("fetching cluster roles", zap.String("continue_token", opts.Continue))
-	resp, err := c.client.RbacV1().ClusterRoles().List(ctx, opts)
+	l.Debug("fetching cluster roles", zap.String("continue_token", listOpts.Continue))
+	resp, err := c.client.RbacV1().ClusterRoles().List(ctx, listOpts)
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("failed to list cluster roles: %w", err)
+		return nil, nil, fmt.Errorf("failed to list cluster roles: %w", err)
 	}
 
 	// Process each cluster role into a Baton resource
@@ -87,10 +76,10 @@ func (c *clusterRoleBuilder) List(ctx context.Context, parentResourceID *v2.Reso
 	// Calculate next page token
 	nextPageToken, err := HandleKubePagination(&resp.ListMeta, bag)
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("failed to handle pagination: %w", err)
+		return nil, nil, fmt.Errorf("failed to handle pagination: %w", err)
 	}
 
-	return rv, nextPageToken, nil, nil
+	return rv, &rs.SyncOpResults{NextPageToken: nextPageToken}, nil
 }
 
 // clusterRoleResource creates a Baton resource from a Kubernetes ClusterRole.
@@ -138,7 +127,7 @@ func clusterRoleResource(clusterRole *rbacv1.ClusterRole) (*v2.Resource, error) 
 }
 
 // Entitlements returns entitlements for ClusterRole resources.
-func (c *clusterRoleBuilder) Entitlements(ctx context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
+func (c *clusterRoleBuilder) Entitlements(ctx context.Context, resource *v2.Resource, _ rs.SyncOpAttrs) ([]*v2.Entitlement, *rs.SyncOpResults, error) {
 	var entitlements []*v2.Entitlement
 
 	// Create the 'all:member' entitlement for the cluster role for cluster level (all namespaces)
@@ -159,7 +148,7 @@ func (c *clusterRoleBuilder) Entitlements(ctx context.Context, resource *v2.Reso
 	// Create entitlements for each namespace.
 	err := c.cacheNamespaces(ctx)
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("failed to cache namespaces: %w", err)
+		return nil, nil, fmt.Errorf("failed to cache namespaces: %w", err)
 	}
 
 	for _, ns := range c.cachedNamespaces {
@@ -178,30 +167,30 @@ func (c *clusterRoleBuilder) Entitlements(ctx context.Context, resource *v2.Reso
 		entitlements = append(entitlements, nsEnt)
 	}
 
-	return entitlements, "", nil, nil
+	return entitlements, nil, nil
 }
 
 // Grants returns permission grants for ClusterRole resources.
-func (c *clusterRoleBuilder) Grants(ctx context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
+func (c *clusterRoleBuilder) Grants(ctx context.Context, resource *v2.Resource, opts rs.SyncOpAttrs) ([]*v2.Grant, *rs.SyncOpResults, error) {
 	l := ctxzap.Extract(ctx)
 	var rv []*v2.Grant
 
 	// Extract cluster role name from resource
 	if resource.Id == nil || resource.Id.Resource == "" {
-		return nil, "", nil, fmt.Errorf("invalid resource ID")
+		return nil, nil, fmt.Errorf("invalid resource ID")
 	}
 	name := resource.Id.Resource
 
 	// Get matching role bindings and cluster role bindings from the binding provider
-	matchingRoleBindings, matchingClusterBindings, err := c.bindingProvider.GetMatchingBindingsForClusterRole(ctx, name)
+	matchingRoleBindings, matchingClusterBindings, err := c.bindingProvider.GetMatchingBindingsForClusterRole(ctx, opts.SyncID, name)
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("failed to get matching bindings: %w", err)
+		return nil, nil, fmt.Errorf("failed to get matching bindings: %w", err)
 	}
 
 	// If there are no bindings, there are no grants
 	if len(matchingRoleBindings) == 0 && len(matchingClusterBindings) == 0 {
 		l.Debug("no bindings found for cluster role", zap.String("name", name))
-		return nil, "", nil, nil
+		return nil, nil, nil
 	}
 
 	// Process each matching cluster binding
@@ -237,7 +226,7 @@ func (c *clusterRoleBuilder) Grants(ctx context.Context, resource *v2.Resource, 
 		}
 	}
 
-	return rv, "", nil, nil
+	return rv, nil, nil
 }
 
 // getNamespaces returns cached namespaces or fetches them if cache is expired or empty.
@@ -255,10 +244,10 @@ func (c *clusterRoleBuilder) cacheNamespaces(ctx context.Context) error {
 		continueAt string
 	)
 	for {
-		opts := metav1.ListOptions{
+		listOpts := metav1.ListOptions{
 			Continue: continueAt,
 		}
-		nsList, err := c.client.CoreV1().Namespaces().List(ctx, opts)
+		nsList, err := c.client.CoreV1().Namespaces().List(ctx, listOpts)
 		if err != nil {
 			return fmt.Errorf("failed to cache namespaces list: %w", err)
 		}

@@ -9,8 +9,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
-	"github.com/conductorone/baton-sdk/pkg/annotations"
-	"github.com/conductorone/baton-sdk/pkg/pagination"
 	"github.com/conductorone/baton-sdk/pkg/types/entitlement"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
@@ -28,18 +26,18 @@ func (s *serviceAccountBuilder) ResourceType(ctx context.Context) *v2.ResourceTy
 }
 
 // List fetches all ServiceAccounts from the Kubernetes API.
-func (s *serviceAccountBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, pToken *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
+func (s *serviceAccountBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, opts rs.SyncOpAttrs) ([]*v2.Resource, *rs.SyncOpResults, error) {
 	l := ctxzap.Extract(ctx)
 	if parentResourceID == nil {
-		return nil, "", nil, nil
+		return nil, nil, nil
 	}
 	// Initialize empty resource slice
 	var rv []*v2.Resource
 
 	// Parse pagination token
-	bag, err := ParsePageToken(pToken.Token)
+	bag, err := ParsePageToken(opts.PageToken.Token)
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("failed to parse page token: %w", err)
+		return nil, nil, fmt.Errorf("failed to parse page token: %w", err)
 	}
 
 	// Add wildcard resource first, but only on the first page (when page token is empty)
@@ -53,17 +51,17 @@ func (s *serviceAccountBuilder) List(ctx context.Context, parentResourceID *v2.R
 	}
 
 	// Set up list options with pagination
-	opts := metav1.ListOptions{
+	listOpts := metav1.ListOptions{
 		Limit:    ResourcesPageSize,
 		Continue: bag.PageToken(),
 	}
 
 	// Fetch service accounts from the Kubernetes API for the parent namespace
-	l.Debug("fetching service accounts", zap.String("continue_token", opts.Continue))
+	l.Debug("fetching service accounts", zap.String("continue_token", listOpts.Continue))
 	parentNamespace := parentResourceID.Resource
-	resp, err := s.client.CoreV1().ServiceAccounts(parentNamespace).List(ctx, opts)
+	resp, err := s.client.CoreV1().ServiceAccounts(parentNamespace).List(ctx, listOpts)
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("failed to list service accounts: %w", err)
+		return nil, nil, fmt.Errorf("failed to list service accounts: %w", err)
 	}
 
 	// Process each service account into a Baton resource
@@ -82,10 +80,10 @@ func (s *serviceAccountBuilder) List(ctx context.Context, parentResourceID *v2.R
 	// Calculate next page token
 	nextPageToken, err := HandleKubePagination(&resp.ListMeta, bag)
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("failed to handle pagination: %w", err)
+		return nil, nil, fmt.Errorf("failed to handle pagination: %w", err)
 	}
 
-	return rv, nextPageToken, nil, nil
+	return rv, &rs.SyncOpResults{NextPageToken: nextPageToken}, nil
 }
 
 // serviceAccountResource creates a Baton resource from a Kubernetes ServiceAccount.
@@ -146,7 +144,7 @@ func serviceAccountResource(serviceAccount *corev1.ServiceAccount) (*v2.Resource
 }
 
 // Entitlements returns entitlements for ServiceAccount resources.
-func (s *serviceAccountBuilder) Entitlements(_ context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
+func (s *serviceAccountBuilder) Entitlements(_ context.Context, resource *v2.Resource, _ rs.SyncOpAttrs) ([]*v2.Entitlement, *rs.SyncOpResults, error) {
 	// Add 'impersonate' entitlement
 	impersonateEnt := entitlement.NewPermissionEntitlement(
 		resource,
@@ -159,12 +157,12 @@ func (s *serviceAccountBuilder) Entitlements(_ context.Context, resource *v2.Res
 		),
 	)
 
-	return []*v2.Entitlement{impersonateEnt}, "", nil, nil
+	return []*v2.Entitlement{impersonateEnt}, nil, nil
 }
 
 // Grants returns no grants for ServiceAccount resources.
-func (s *serviceAccountBuilder) Grants(_ context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
-	return nil, "", nil, nil
+func (s *serviceAccountBuilder) Grants(_ context.Context, resource *v2.Resource, _ rs.SyncOpAttrs) ([]*v2.Grant, *rs.SyncOpResults, error) {
+	return nil, nil, nil
 }
 
 // newServiceAccountBuilder creates a new service account builder.

@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
-	"github.com/conductorone/baton-sdk/pkg/pagination"
+	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
@@ -102,12 +102,10 @@ func TestStatefulSetBuilderList(t *testing.T) {
 
 	// Call List method
 	ctx := context.Background()
-	pToken := &pagination.Token{}
-	resources, nextPageToken, ann, err := builder.List(ctx, nil, pToken)
+	resources, nextPageToken, err := builder.List(ctx, nil, rs.SyncOpAttrs{})
 
 	// Assertions
 	require.NoError(t, err)
-	require.Nil(t, ann)
 	// Expecting 3 resources: the wildcard resource plus the 2 test StatefulSets
 	require.Len(t, resources, 3)
 	assert.Empty(t, nextPageToken)
@@ -157,12 +155,10 @@ func TestStatefulSetBuilderEntitlements(t *testing.T) {
 
 	// Call Entitlements method
 	ctx := context.Background()
-	pToken := &pagination.Token{}
-	entitlements, nextPageToken, ann, err := builder.Entitlements(ctx, testResource, pToken)
+	entitlements, nextPageToken, err := builder.Entitlements(ctx, testResource, rs.SyncOpAttrs{})
 
 	// Assertions
 	require.NoError(t, err)
-	require.Nil(t, ann)
 	assert.Empty(t, nextPageToken)
 
 	// Verify standard verb entitlements
@@ -203,12 +199,10 @@ func TestStatefulSetBuilderGrants(t *testing.T) {
 
 	// Call Grants method
 	ctx := context.Background()
-	pToken := &pagination.Token{}
-	grants, nextPageToken, ann, err := builder.Grants(ctx, testResource, pToken)
+	grants, nextPageToken, err := builder.Grants(ctx, testResource, rs.SyncOpAttrs{})
 
 	// Assertions - StatefulSets should return no grants
 	require.NoError(t, err)
-	require.Nil(t, ann)
 	assert.Empty(t, nextPageToken)
 	assert.Empty(t, grants)
 }

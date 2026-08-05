@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/conductorone/baton-sdk/pkg/pagination"
+	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
@@ -70,14 +71,15 @@ func TestKubeUserBuilderPhase3BuildsCache(t *testing.T) {
 	secret := makeKubeconfigSecret(t, "kc-secret", "default", "alice", []string{"dev-team"})
 	fakeClient := fake.NewSimpleClientset(secret)
 
-	k8s := &Kubernetes{client: fakeClient}
-	builder := newKubeUserBuilder(fakeClient, k8s)
+	builder := newKubeUserBuilder(fakeClient)
 
 	phaseToken, err := marshalPhaseToken(phaseSecrets, "")
 	require.NoError(t, err)
 
 	ctx := context.Background()
-	resources, nextToken, _, err := builder.List(ctx, nil, &pagination.Token{Token: phaseToken})
+	store := newMemorySessionStore()
+	resources, nextToken, err := builder.List(ctx, nil,
+		rs.SyncOpAttrs{PageToken: pagination.Token{Token: phaseToken}, Session: store})
 
 	require.NoError(t, err)
 	assert.Empty(t, nextToken, "Phase 3 should complete in one call")
@@ -85,10 +87,9 @@ func TestKubeUserBuilderPhase3BuildsCache(t *testing.T) {
 	assert.Equal(t, "alice", resources[0].DisplayName)
 
 	// The secrets cache must be sealed after Phase 3 completes.
-	k8s.secretsMu.Lock()
-	result := k8s.secretsResult
-	k8s.secretsMu.Unlock()
-	require.NotNil(t, result, "secretsResult must be sealed after Phase 3")
+	result, found := loadSecretsScan(ctx, store)
+	require.True(t, found, "the x509 scan must be persisted after Phase 3")
+	require.True(t, result.Sealed, "the x509 scan must be sealed after Phase 3")
 	assert.Equal(t, []string{"alice"}, result.Usernames)
 	assert.Equal(t, []string{"alice"}, result.GroupMembers["dev-team"])
 }
@@ -116,23 +117,22 @@ func TestKubeUserBuilderPhase3EmptyCNSkipped(t *testing.T) {
 	secret := makeKubeconfigSecretWithEmptyCN(t, "kc-empty-cn", "default", []string{"ops-team"})
 	fakeClient := fake.NewSimpleClientset(secret)
 
-	k8s := &Kubernetes{client: fakeClient}
-	builder := newKubeUserBuilder(fakeClient, k8s)
+	builder := newKubeUserBuilder(fakeClient)
 
 	phaseToken, err := marshalPhaseToken(phaseSecrets, "")
 	require.NoError(t, err)
 
 	ctx := context.Background()
-	resources, nextToken, _, err := builder.List(ctx, nil, &pagination.Token{Token: phaseToken})
+	store := newMemorySessionStore()
+	resources, nextToken, err := builder.List(ctx, nil,
+		rs.SyncOpAttrs{PageToken: pagination.Token{Token: phaseToken}, Session: store})
 
 	require.NoError(t, err)
 	assert.Empty(t, nextToken)
 	assert.Empty(t, resources, "empty CN must not produce a user resource")
 
-	k8s.secretsMu.Lock()
-	result := k8s.secretsResult
-	k8s.secretsMu.Unlock()
-	require.NotNil(t, result)
+	result, found := loadSecretsScan(ctx, store)
+	require.True(t, found)
 	assert.Empty(t, result.Usernames, "empty CN must not be added to Usernames")
 	assert.Empty(t, result.GroupMembers["ops-team"],
 		"empty CN must not produce group membership entries")
@@ -147,23 +147,23 @@ func TestKubeUserBuilderPhase3MultiPageAccumulates(t *testing.T) {
 	secret2 := makeKubeconfigSecret(t, "kc-page2", "default", "bob", []string{"ops-team"})
 	fakeClient := fake.NewSimpleClientset(secret2)
 
-	k8s := &Kubernetes{client: fakeClient}
-	builder := newKubeUserBuilder(fakeClient, k8s)
+	builder := newKubeUserBuilder(fakeClient)
 
-	// Pre-seed accumulator as if page 1 already processed "alice" in dev-team.
-	k8s.secretsMu.Lock()
-	k8s.secretsAccumulator = &secretsScanResult{
+	ctx := context.Background()
+	store := newMemorySessionStore()
+
+	// Pre-seed the running scan as if page 1 already processed "alice" in dev-team.
+	require.True(t, storeSecretsScan(ctx, store, &secretsScanResult{
 		Usernames:    []string{"alice"},
 		GroupMembers: map[string][]string{"dev-team": {"alice"}},
-	}
-	k8s.secretsMu.Unlock()
+	}))
 
-	// Non-empty continue token → accumulator init is skipped (page 2).
+	// Non-empty continue token → this is page 2.
 	phaseToken, err := marshalPhaseToken(phaseSecrets, "fake-continue-token")
 	require.NoError(t, err)
 
-	ctx := context.Background()
-	resources, nextToken, _, err := builder.List(ctx, nil, &pagination.Token{Token: phaseToken})
+	resources, nextToken, err := builder.List(ctx, nil,
+		rs.SyncOpAttrs{PageToken: pagination.Token{Token: phaseToken}, Session: store})
 
 	require.NoError(t, err)
 	assert.Empty(t, nextToken, "no more pages after the final page")
@@ -171,13 +171,9 @@ func TestKubeUserBuilderPhase3MultiPageAccumulates(t *testing.T) {
 	assert.Equal(t, "bob", resources[0].DisplayName)
 
 	// Sealed result must contain both pages' data.
-	k8s.secretsMu.RLock()
-	result := k8s.secretsResult
-	acc := k8s.secretsAccumulator
-	k8s.secretsMu.RUnlock()
-
-	require.NotNil(t, result)
-	assert.Nil(t, acc, "accumulator must be nil after sealing")
+	result, found := loadSecretsScan(ctx, store)
+	require.True(t, found)
+	assert.True(t, result.Sealed, "the final page must seal the scan")
 	assert.ElementsMatch(t, []string{"alice", "bob"}, result.Usernames)
 	assert.ElementsMatch(t, []string{"alice"}, result.GroupMembers["dev-team"])
 	assert.ElementsMatch(t, []string{"bob"}, result.GroupMembers["ops-team"])
@@ -190,21 +186,21 @@ func TestKubeUserBuilderPhase3DeduplicatesUsers(t *testing.T) {
 	secret2 := makeKubeconfigSecret(t, "secret-2", "default", "alice", nil)
 	fakeClient := fake.NewSimpleClientset(secret1, secret2)
 
-	k8s := &Kubernetes{client: fakeClient}
-	builder := newKubeUserBuilder(fakeClient, k8s)
+	builder := newKubeUserBuilder(fakeClient)
 
 	phaseToken, err := marshalPhaseToken(phaseSecrets, "")
 	require.NoError(t, err)
 
 	ctx := context.Background()
-	resources, _, _, err := builder.List(ctx, nil, &pagination.Token{Token: phaseToken})
+	store := newMemorySessionStore()
+	resources, _, err := builder.List(ctx, nil,
+		rs.SyncOpAttrs{PageToken: pagination.Token{Token: phaseToken}, Session: store})
 
 	require.NoError(t, err)
 	assert.Len(t, resources, 1, "duplicate CN must produce exactly one user resource")
 
-	k8s.secretsMu.Lock()
-	result := k8s.secretsResult
-	k8s.secretsMu.Unlock()
+	result, found := loadSecretsScan(ctx, store)
+	require.True(t, found)
 	assert.Len(t, result.Usernames, 1)
 }
 
@@ -219,23 +215,23 @@ func TestKubeUserBuilderPhase3SecretsListForbidden(t *testing.T) {
 			schema.GroupResource{Resource: "secrets"}, "", fmt.Errorf("no cluster-wide secret access"))
 	})
 
-	k8s := &Kubernetes{client: fakeClient}
-	builder := newKubeUserBuilder(fakeClient, k8s)
+	builder := newKubeUserBuilder(fakeClient)
 
 	phaseToken, err := marshalPhaseToken(phaseSecrets, "")
 	require.NoError(t, err)
 
 	ctx := context.Background()
-	resources, nextToken, _, err := builder.List(ctx, nil, &pagination.Token{Token: phaseToken})
+	store := newMemorySessionStore()
+	resources, nextToken, err := builder.List(ctx, nil,
+		rs.SyncOpAttrs{PageToken: pagination.Token{Token: phaseToken}, Session: store})
 
 	require.NoError(t, err, "a forbidden secrets list must not fail the user sync")
 	assert.Empty(t, nextToken, "sync must complete cleanly")
 	assert.Empty(t, resources)
 
-	k8s.secretsMu.Lock()
-	result := k8s.secretsResult
-	k8s.secretsMu.Unlock()
-	require.NotNil(t, result, "secrets result must be sealed even on failure")
+	result, found := loadSecretsScan(ctx, store)
+	require.True(t, found, "the scan must be persisted even on failure")
+	require.True(t, result.Sealed, "the scan must be sealed even on failure")
 	assert.Empty(t, result.Usernames)
 	assert.Empty(t, result.GroupMembers)
 }
@@ -249,21 +245,23 @@ func TestKubeUserBuilderPhase3SecretsListTransientError(t *testing.T) {
 		return true, nil, k8serrors.NewInternalError(fmt.Errorf("apiserver is having a bad day"))
 	})
 
-	k8s := &Kubernetes{client: fakeClient}
-	builder := newKubeUserBuilder(fakeClient, k8s)
+	builder := newKubeUserBuilder(fakeClient)
 
 	phaseToken, err := marshalPhaseToken(phaseSecrets, "")
 	require.NoError(t, err)
 
-	_, _, _, err = builder.List(context.Background(), nil, &pagination.Token{Token: phaseToken})
+	ctx := context.Background()
+	store := newMemorySessionStore()
+	_, _, err = builder.List(ctx, nil,
+		rs.SyncOpAttrs{PageToken: pagination.Token{Token: phaseToken}, Session: store})
 
 	require.Error(t, err, "a transient secrets-list failure must surface, not be swallowed")
 	assert.Contains(t, err.Error(), "failed to list secrets")
 
-	k8s.secretsMu.Lock()
-	result := k8s.secretsResult
-	k8s.secretsMu.Unlock()
-	assert.Nil(t, result, "an incomplete result must not be sealed on a real failure")
+	result, found := loadSecretsScan(ctx, store)
+	if found {
+		assert.False(t, result.Sealed, "an incomplete scan must not be sealed on a real failure")
+	}
 }
 
 // TestKubeUserBuilderListAcrossSyncs reproduces the service-mode failure where a
@@ -279,19 +277,48 @@ func TestKubeUserBuilderListAcrossSyncs(t *testing.T) {
 		RoleRef: rbacv1.RoleRef{Kind: RBACKindRole, Name: "some-role", APIGroup: RBACAPIGroup},
 	}
 	fakeClient := fake.NewSimpleClientset(rb)
-	k8s := &Kubernetes{client: fakeClient}
-	builder := newKubeUserBuilder(fakeClient, k8s)
+	builder := newKubeUserBuilder(fakeClient)
 	ctx := context.Background()
 
-	// Sync 1: a fresh sync always starts with an empty page token.
-	first, _, _, err := builder.List(ctx, nil, &pagination.Token{})
+	first, _, err := builder.List(ctx, nil, rs.SyncOpAttrs{SyncID: "sync-1"})
 	require.NoError(t, err)
 	require.Len(t, first, 1, "first sync must emit the user")
 
 	// Sync 2: same builder instance, as in a long-running service-mode process.
-	second, _, _, err := builder.List(ctx, nil, &pagination.Token{})
+	second, _, err := builder.List(ctx, nil, rs.SyncOpAttrs{SyncID: "sync-2"})
 	require.NoError(t, err)
 	assert.Len(t, second, 1, "a later sync must re-emit the user, not drop it")
+}
+
+// TestKubeUserBuilderDedupesWithinSync is the other half of the contract: pages
+// of the same sync must still deduplicate, or the cache reset would be trading
+// one bug for redundant writes.
+func TestKubeUserBuilderDedupesWithinSync(t *testing.T) {
+	rb := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: "rb", Namespace: "team-a"},
+		Subjects: []rbacv1.Subject{
+			{Kind: SubjectKindUser, Name: "alice@example.com", APIGroup: RBACAPIGroup},
+		},
+		RoleRef: rbacv1.RoleRef{Kind: RBACKindRole, Name: "some-role", APIGroup: RBACAPIGroup},
+	}
+	fakeClient := fake.NewSimpleClientset(rb)
+	builder := newKubeUserBuilder(fakeClient)
+	ctx := context.Background()
+
+	first, _, err := builder.List(ctx, nil, rs.SyncOpAttrs{SyncID: "sync-1"})
+	require.NoError(t, err)
+	require.Len(t, first, 1)
+
+	// Phase 2 of the same sync re-encounters alice through a ClusterRoleBinding
+	// scan; she must not be emitted twice.
+	phaseToken, err := marshalPhaseToken(phaseRoleBindings, "")
+	require.NoError(t, err)
+	second, _, err := builder.List(ctx, nil, rs.SyncOpAttrs{
+		SyncID:    "sync-1",
+		PageToken: pagination.Token{Token: phaseToken},
+	})
+	require.NoError(t, err)
+	assert.Empty(t, second, "a later page of the same sync must not re-emit the user")
 }
 
 // TestKubeGroupBuilderListAcrossSyncs is the kube_group half of the same bug.
@@ -304,16 +331,15 @@ func TestKubeGroupBuilderListAcrossSyncs(t *testing.T) {
 		RoleRef: rbacv1.RoleRef{Kind: RBACKindRole, Name: "some-role", APIGroup: RBACAPIGroup},
 	}
 	fakeClient := fake.NewSimpleClientset(rb)
-	k8s := &Kubernetes{client: fakeClient}
-	builder := newKubeGroupBuilder(fakeClient, k8s)
+	builder := newKubeGroupBuilder(fakeClient)
 	ctx := context.Background()
 
-	first, _, _, err := builder.List(ctx, nil, &pagination.Token{})
+	first, _, err := builder.List(ctx, nil, rs.SyncOpAttrs{SyncID: "sync-1"})
 	require.NoError(t, err)
 	firstCount := len(first)
 	require.NotZero(t, firstCount, "first sync must emit groups")
 
-	second, _, _, err := builder.List(ctx, nil, &pagination.Token{})
+	second, _, err := builder.List(ctx, nil, rs.SyncOpAttrs{SyncID: "sync-2"})
 	require.NoError(t, err)
 	assert.Equal(t, firstCount, len(second), "a later sync must re-emit the same groups")
 }

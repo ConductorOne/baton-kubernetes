@@ -10,8 +10,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
-	"github.com/conductorone/baton-sdk/pkg/annotations"
-	"github.com/conductorone/baton-sdk/pkg/pagination"
 	"github.com/conductorone/baton-sdk/pkg/types/entitlement"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
@@ -30,38 +28,29 @@ func (r *roleBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
 }
 
 // List fetches all Roles from the Kubernetes API.
-func (r *roleBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, pToken *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
+func (r *roleBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, opts rs.SyncOpAttrs) ([]*v2.Resource, *rs.SyncOpResults, error) {
 	l := ctxzap.Extract(ctx)
 
 	// Initialize empty resource slice
 	var rv []*v2.Resource
 
-	// An empty page token marks the start of a new sync. Drop the shared
-	// binding caches so this sync's grants reflect current cluster state
-	// rather than whatever the first sync of this process observed.
-	if pToken.Token == "" && r.bindingProvider != nil {
-		if k8s, ok := r.bindingProvider.(*Kubernetes); ok {
-			k8s.invalidateBindingsCaches()
-		}
-	}
-
 	// Parse pagination token
-	bag, err := ParsePageToken(pToken.Token)
+	bag, err := ParsePageToken(opts.PageToken.Token)
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("failed to parse page token: %w", err)
+		return nil, nil, fmt.Errorf("failed to parse page token: %w", err)
 	}
 
 	// Set up list options with pagination
-	opts := metav1.ListOptions{
+	listOpts := metav1.ListOptions{
 		Limit:    ResourcesPageSize,
 		Continue: bag.PageToken(),
 	}
 
 	// Fetch roles from the Kubernetes API across all namespaces
-	l.Debug("fetching roles", zap.String("continue_token", opts.Continue))
-	resp, err := r.client.RbacV1().Roles("").List(ctx, opts)
+	l.Debug("fetching roles", zap.String("continue_token", listOpts.Continue))
+	resp, err := r.client.RbacV1().Roles("").List(ctx, listOpts)
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("failed to list roles: %w", err)
+		return nil, nil, fmt.Errorf("failed to list roles: %w", err)
 	}
 
 	// Process each role into a Baton resource
@@ -80,10 +69,10 @@ func (r *roleBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId,
 	// Calculate next page token
 	nextPageToken, err := HandleKubePagination(&resp.ListMeta, bag)
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("failed to handle pagination: %w", err)
+		return nil, nil, fmt.Errorf("failed to handle pagination: %w", err)
 	}
 
-	return rv, nextPageToken, nil, nil
+	return rv, &rs.SyncOpResults{NextPageToken: nextPageToken}, nil
 }
 
 // roleResource creates a Baton resource from a Kubernetes Role.
@@ -135,7 +124,7 @@ func roleResource(role *rbacv1.Role) (*v2.Resource, error) {
 }
 
 // Entitlements returns entitlements for Role resources.
-func (r *roleBuilder) Entitlements(ctx context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
+func (r *roleBuilder) Entitlements(ctx context.Context, resource *v2.Resource, _ rs.SyncOpAttrs) ([]*v2.Entitlement, *rs.SyncOpResults, error) {
 	var entitlements []*v2.Entitlement
 
 	// Create the 'member' entitlement for the role
@@ -152,7 +141,7 @@ func (r *roleBuilder) Entitlements(ctx context.Context, resource *v2.Resource, _
 	)
 	entitlements = append(entitlements, memberEnt)
 
-	return entitlements, "", nil, nil
+	return entitlements, nil, nil
 }
 
 // parseResourceID extracts namespace and name from a role resource ID.
@@ -170,26 +159,26 @@ func parseRoleResourceID(resourceID *v2.ResourceId) (string, string, error) {
 }
 
 // Grants returns permission grants for Role resources.
-func (r *roleBuilder) Grants(ctx context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
+func (r *roleBuilder) Grants(ctx context.Context, resource *v2.Resource, opts rs.SyncOpAttrs) ([]*v2.Grant, *rs.SyncOpResults, error) {
 	l := ctxzap.Extract(ctx)
 	var rv []*v2.Grant
 
 	// Parse the resource ID to get namespace and name
 	namespace, name, err := parseRoleResourceID(resource.Id)
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("failed to parse resource ID: %w", err)
+		return nil, nil, fmt.Errorf("failed to parse resource ID: %w", err)
 	}
 
 	// Get matching role bindings from the binding provider
-	matchingBindings, err := r.bindingProvider.GetMatchingRoleBindings(ctx, namespace, name)
+	matchingBindings, err := r.bindingProvider.GetMatchingRoleBindings(ctx, opts.SyncID, namespace, name)
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("failed to get matching role bindings: %w", err)
+		return nil, nil, fmt.Errorf("failed to get matching role bindings: %w", err)
 	}
 
 	// If there are no bindings, there are no grants
 	if len(matchingBindings) == 0 {
 		l.Debug("no role bindings found for role", zap.String("namespace", namespace), zap.String("name", name))
-		return nil, "", nil, nil
+		return nil, nil, nil
 	}
 
 	// Process each matching binding
@@ -210,7 +199,7 @@ func (r *roleBuilder) Grants(ctx context.Context, resource *v2.Resource, _ *pagi
 		}
 	}
 
-	return rv, "", nil, nil
+	return rv, nil, nil
 }
 
 // newRoleBuilder creates a new role builder.

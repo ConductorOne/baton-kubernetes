@@ -9,8 +9,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
-	"github.com/conductorone/baton-sdk/pkg/annotations"
-	"github.com/conductorone/baton-sdk/pkg/pagination"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"go.uber.org/zap"
@@ -27,16 +25,16 @@ func (n *namespaceBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
 }
 
 // List fetches all Namespaces from the Kubernetes API.
-func (n *namespaceBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, pToken *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
+func (n *namespaceBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, opts rs.SyncOpAttrs) ([]*v2.Resource, *rs.SyncOpResults, error) {
 	l := ctxzap.Extract(ctx)
 
 	// Initialize empty resource slice
 	var rv []*v2.Resource
 
 	// Parse pagination token
-	bag, err := ParsePageToken(pToken.Token)
+	bag, err := ParsePageToken(opts.PageToken.Token)
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("failed to parse page token: %w", err)
+		return nil, nil, fmt.Errorf("failed to parse page token: %w", err)
 	}
 
 	// Add wildcard resource first, but only on the first page (when page token is empty)
@@ -50,16 +48,16 @@ func (n *namespaceBuilder) List(ctx context.Context, parentResourceID *v2.Resour
 	}
 
 	// Set up list options with pagination
-	opts := metav1.ListOptions{
+	listOpts := metav1.ListOptions{
 		Limit:    ResourcesPageSize,
 		Continue: bag.PageToken(),
 	}
 
 	// Fetch namespaces from the Kubernetes API
-	l.Debug("fetching namespaces", zap.String("continue_token", opts.Continue))
-	resp, err := n.client.CoreV1().Namespaces().List(ctx, opts)
+	l.Debug("fetching namespaces", zap.String("continue_token", listOpts.Continue))
+	resp, err := n.client.CoreV1().Namespaces().List(ctx, listOpts)
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("failed to list namespaces: %w", err)
+		return nil, nil, fmt.Errorf("failed to list namespaces: %w", err)
 	}
 
 	// Process each namespace into a Baton resource
@@ -75,10 +73,10 @@ func (n *namespaceBuilder) List(ctx context.Context, parentResourceID *v2.Resour
 	// Calculate next page token
 	nextPageToken, err := HandleKubePagination(&resp.ListMeta, bag)
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("failed to handle pagination: %w", err)
+		return nil, nil, fmt.Errorf("failed to handle pagination: %w", err)
 	}
 
-	return rv, nextPageToken, nil, nil
+	return rv, &rs.SyncOpResults{NextPageToken: nextPageToken}, nil
 }
 
 // namespaceResource creates a Baton resource from a Kubernetes Namespace.
@@ -117,13 +115,13 @@ func namespaceResource(ns *corev1.Namespace) (*v2.Resource, error) {
 }
 
 // Entitlements returns no entitlements for Namespace resources.
-func (n *namespaceBuilder) Entitlements(_ context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
-	return nil, "", nil, nil
+func (n *namespaceBuilder) Entitlements(_ context.Context, resource *v2.Resource, _ rs.SyncOpAttrs) ([]*v2.Entitlement, *rs.SyncOpResults, error) {
+	return nil, nil, nil
 }
 
 // Grants returns no grants for Namespace resources.
-func (n *namespaceBuilder) Grants(_ context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
-	return nil, "", nil, nil
+func (n *namespaceBuilder) Grants(_ context.Context, resource *v2.Resource, _ rs.SyncOpAttrs) ([]*v2.Grant, *rs.SyncOpResults, error) {
+	return nil, nil, nil
 }
 
 // newNamespaceBuilder creates a new namespace builder.

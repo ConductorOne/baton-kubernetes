@@ -18,7 +18,7 @@ func TestNewFromConfigExplicitServerSkipsKubeconfigGuard(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("KUBECONFIG", "")
 
-	k, err := NewFromConfig(context.Background(), &pkgconfig.Kubernetes{
+	k, _, err := NewFromConfig(context.Background(), &pkgconfig.Kubernetes{
 		Server:                "https://127.0.0.1:65535",
 		Token:                 "fake-token",
 		InsecureSkipTlsVerify: true,
@@ -35,7 +35,7 @@ func TestNewFromConfigNoSourceStillGuarded(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("KUBECONFIG", "")
 
-	_, err := NewFromConfig(context.Background(), &pkgconfig.Kubernetes{}, nil)
+	_, _, err := NewFromConfig(context.Background(), &pkgconfig.Kubernetes{}, nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no kubeconfig available")

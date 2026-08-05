@@ -9,8 +9,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
-	"github.com/conductorone/baton-sdk/pkg/annotations"
-	"github.com/conductorone/baton-sdk/pkg/pagination"
 	"github.com/conductorone/baton-sdk/pkg/types/entitlement"
 	"github.com/conductorone/baton-sdk/pkg/types/grant"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
@@ -21,10 +19,11 @@ import (
 // kubeGroupBuilder syncs Kubernetes groups referenced in RBAC bindings as Baton groups.
 type kubeGroupBuilder struct {
 	client kubernetes.Interface
-	k8s    *Kubernetes
-	// Cache to avoid duplicate work when extracting groups from bindings
-	groupCache     map[string]bool
-	groupCacheLock sync.RWMutex
+	// groupCache deduplicates groups across the pages of one sync, keyed by sync
+	// ID for the same reason as kubeUserBuilder.userCache.
+	groupCache      map[string]bool
+	groupCacheSync  string
+	groupCacheMutex sync.Mutex
 }
 
 // ResourceType returns the resource type for KubeGroup.
@@ -39,24 +38,16 @@ func (k *kubeGroupBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
 //	Phase "clusterrolebindings" – scan ClusterRoleBindings
 //
 // PageState.Token holds the Kubernetes API continue token within each phase.
-func (k *kubeGroupBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, pToken *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
+func (k *kubeGroupBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, opts rs.SyncOpAttrs) ([]*v2.Resource, *rs.SyncOpResults, error) {
 	l := ctxzap.Extract(ctx)
 	var rv []*v2.Resource
 
-	// The dedup cache is scoped to a single sync; see kubeUserBuilder.List. An
-	// empty page token marks the start of a new sync, so it is discarded here --
-	// otherwise a service-mode process emits zero groups on every sync after the
-	// first.
-	k.groupCacheLock.Lock()
-	if pToken.Token == "" || k.groupCache == nil {
-		k.groupCache = make(map[string]bool)
-	}
-	k.groupCacheLock.Unlock()
+	k.resetGroupCacheForSync(opts.SyncID)
 
 	// Parse pagination token
-	bag, err := ParsePageToken(pToken.Token)
+	bag, err := ParsePageToken(opts.PageToken.Token)
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("failed to parse page token: %w", err)
+		return nil, nil, fmt.Errorf("failed to parse page token: %w", err)
 	}
 
 	// Determine current phase; default to rolebindings on first call (empty bag).
@@ -78,15 +69,15 @@ func (k *kubeGroupBuilder) List(ctx context.Context, parentResourceID *v2.Resour
 
 	// Phase 1: Process RoleBindings
 	if phase == phaseRoleBindings {
-		opts := metav1.ListOptions{
+		listOpts := metav1.ListOptions{
 			Limit:    ResourcesPageSize,
 			Continue: bag.PageToken(),
 		}
 
-		l.Debug("fetching role bindings for groups", zap.String("continue_token", opts.Continue))
-		resp, err := k.client.RbacV1().RoleBindings("").List(ctx, opts)
+		l.Debug("fetching role bindings for groups", zap.String("continue_token", listOpts.Continue))
+		resp, err := k.client.RbacV1().RoleBindings("").List(ctx, listOpts)
 		if err != nil {
-			return nil, "", nil, fmt.Errorf("failed to list role bindings: %w", err)
+			return nil, nil, fmt.Errorf("failed to list role bindings: %w", err)
 		}
 
 		for _, binding := range resp.Items {
@@ -101,30 +92,30 @@ func (k *kubeGroupBuilder) List(ctx context.Context, parentResourceID *v2.Resour
 			// More RoleBinding pages remain.
 			nextToken, err := marshalPhaseToken(phaseRoleBindings, resp.Continue)
 			if err != nil {
-				return nil, "", nil, err
+				return nil, nil, err
 			}
-			return rv, nextToken, nil, nil
+			return rv, &rs.SyncOpResults{NextPageToken: nextToken}, nil
 		}
 
 		// Phase 1 complete — advance to Phase 2.
 		nextToken, err := marshalPhaseToken(phaseClusterRoleBindings, "")
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
-		return rv, nextToken, nil, nil
+		return rv, &rs.SyncOpResults{NextPageToken: nextToken}, nil
 	}
 
 	// Phase 2: Process ClusterRoleBindings
 	if phase == phaseClusterRoleBindings {
-		opts := metav1.ListOptions{
+		listOpts := metav1.ListOptions{
 			Limit:    ResourcesPageSize,
 			Continue: bag.PageToken(),
 		}
 
-		l.Debug("fetching cluster role bindings for groups", zap.String("continue_token", opts.Continue))
-		resp, err := k.client.RbacV1().ClusterRoleBindings().List(ctx, opts)
+		l.Debug("fetching cluster role bindings for groups", zap.String("continue_token", listOpts.Continue))
+		resp, err := k.client.RbacV1().ClusterRoleBindings().List(ctx, listOpts)
 		if err != nil {
-			return nil, "", nil, fmt.Errorf("failed to list cluster role bindings: %w", err)
+			return nil, nil, fmt.Errorf("failed to list cluster role bindings: %w", err)
 		}
 
 		for _, binding := range resp.Items {
@@ -139,33 +130,49 @@ func (k *kubeGroupBuilder) List(ctx context.Context, parentResourceID *v2.Resour
 			// More ClusterRoleBinding pages remain.
 			nextToken, err := marshalPhaseToken(phaseClusterRoleBindings, resp.Continue)
 			if err != nil {
-				return nil, "", nil, err
+				return nil, nil, err
 			}
-			return rv, nextToken, nil, nil
+			return rv, &rs.SyncOpResults{NextPageToken: nextToken}, nil
 		}
 	}
 
 	// All phases complete.
-	return rv, "", nil, nil
+	return rv, nil, nil
+}
+
+// resetGroupCacheForSync discards the dedup cache when it belongs to an earlier
+// sync; see kubeUserBuilder.resetUserCacheForSync.
+func (k *kubeGroupBuilder) resetGroupCacheForSync(syncID string) {
+	k.groupCacheMutex.Lock()
+	defer k.groupCacheMutex.Unlock()
+	if k.groupCache == nil || k.groupCacheSync != syncID {
+		k.groupCache = make(map[string]bool)
+		k.groupCacheSync = syncID
+	}
+}
+
+// markGroupProcessed records the group and reports whether this call was the
+// first to see it; see kubeUserBuilder.markUserProcessed.
+func (k *kubeGroupBuilder) markGroupProcessed(groupName string) bool {
+	k.groupCacheMutex.Lock()
+	defer k.groupCacheMutex.Unlock()
+	if k.groupCache == nil {
+		k.groupCache = make(map[string]bool)
+	}
+	if k.groupCache[groupName] {
+		return false
+	}
+	k.groupCache[groupName] = true
+	return true
 }
 
 // processGroup adds a group to the list of resources if not already processed.
 func (k *kubeGroupBuilder) processGroup(ctx context.Context, groupName string, resources *[]*v2.Resource) {
 	l := ctxzap.Extract(ctx)
 
-	// Check if we've already processed this group
-	k.groupCacheLock.RLock()
-	processed := k.groupCache[groupName]
-	k.groupCacheLock.RUnlock()
-
-	if processed {
+	if !k.markGroupProcessed(groupName) {
 		return
 	}
-
-	// Mark as processed
-	k.groupCacheLock.Lock()
-	k.groupCache[groupName] = true
-	k.groupCacheLock.Unlock()
 
 	// Create group resource
 	resource, err := k.kubeGroupResource(groupName)
@@ -200,7 +207,7 @@ func (k *kubeGroupBuilder) kubeGroupResource(groupName string) (*v2.Resource, er
 }
 
 // Entitlements returns entitlements for Group resources.
-func (k *kubeGroupBuilder) Entitlements(_ context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
+func (k *kubeGroupBuilder) Entitlements(_ context.Context, resource *v2.Resource, _ rs.SyncOpAttrs) ([]*v2.Entitlement, *rs.SyncOpResults, error) {
 	// 'member' assignment entitlement: links users to the group they belong to.
 	// Grants are derived from x509 client certificate O= fields in kubeconfig Secrets.
 	memberEnt := entitlement.NewAssignmentEntitlement(
@@ -214,24 +221,22 @@ func (k *kubeGroupBuilder) Entitlements(_ context.Context, resource *v2.Resource
 		),
 	)
 
-	return []*v2.Entitlement{memberEnt}, "", nil, nil
+	return []*v2.Entitlement{memberEnt}, nil, nil
 }
 
-// Grants returns group membership grants from the sealed secrets cache.
-// The cache is populated by kubeUserBuilder.List() Phase 3.
+// Grants returns group membership grants from the sealed x509 scan that
+// kubeUserBuilder.List() Phase 3 writes to this sync's session store.
 // The SDK guarantees all List() calls complete before Grants() is invoked.
-func (k *kubeGroupBuilder) Grants(ctx context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
-	k.k8s.secretsMu.RLock()
-	result := k.k8s.secretsResult
-	k.k8s.secretsMu.RUnlock()
-
-	if result == nil {
-		// The x509 discovery pass never ran — kube_group is being synced without
-		// kube_user (custom sync selection). Membership is best-effort data;
-		// return no grants rather than failing the sync.
-		ctxzap.Extract(ctx).Debug("no secrets scan result; emitting no group membership grants",
+func (k *kubeGroupBuilder) Grants(ctx context.Context, resource *v2.Resource, opts rs.SyncOpAttrs) ([]*v2.Grant, *rs.SyncOpResults, error) {
+	result, ok := loadSecretsScan(ctx, opts.Session)
+	if !ok || !result.Sealed {
+		// Either the x509 discovery pass never ran — kube_group synced without
+		// kube_user (custom sync selection), or no session store is configured —
+		// or it did not finish. Membership is best-effort data, and a partial
+		// scan would under-report it as fact, so emit nothing either way.
+		ctxzap.Extract(ctx).Debug("no sealed secrets scan; emitting no group membership grants",
 			zap.String("group", resource.Id.Resource))
-		return nil, "", nil, nil
+		return nil, nil, nil
 	}
 
 	principals := result.GroupMembers[resource.Id.Resource]
@@ -240,14 +245,13 @@ func (k *kubeGroupBuilder) Grants(ctx context.Context, resource *v2.Resource, _ 
 		principalResource := GenerateResourceForGrant(principalName, ResourceTypeKubeUser.Id)
 		grants = append(grants, grant.NewGrant(resource, "member", principalResource))
 	}
-	return grants, "", nil, nil
+	return grants, nil, nil
 }
 
 // newKubeGroupBuilder creates a new kube group builder.
-func newKubeGroupBuilder(client kubernetes.Interface, k8s *Kubernetes) *kubeGroupBuilder {
+func newKubeGroupBuilder(client kubernetes.Interface) *kubeGroupBuilder {
 	return &kubeGroupBuilder{
 		client:     client,
-		k8s:        k8s,
 		groupCache: make(map[string]bool),
 	}
 }

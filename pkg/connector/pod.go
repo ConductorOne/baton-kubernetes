@@ -9,8 +9,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
-	"github.com/conductorone/baton-sdk/pkg/annotations"
-	"github.com/conductorone/baton-sdk/pkg/pagination"
 	"github.com/conductorone/baton-sdk/pkg/types/entitlement"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
@@ -28,16 +26,16 @@ func (p *podBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
 }
 
 // List fetches all Pods from the Kubernetes API.
-func (p *podBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, pToken *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
+func (p *podBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, opts rs.SyncOpAttrs) ([]*v2.Resource, *rs.SyncOpResults, error) {
 	l := ctxzap.Extract(ctx)
 
 	// Initialize empty resource slice
 	var rv []*v2.Resource
 
 	// Parse pagination token
-	bag, err := ParsePageToken(pToken.Token)
+	bag, err := ParsePageToken(opts.PageToken.Token)
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("failed to parse page token: %w", err)
+		return nil, nil, fmt.Errorf("failed to parse page token: %w", err)
 	}
 
 	// Add wildcard resource first, but only on the first page (when page token is empty)
@@ -51,16 +49,16 @@ func (p *podBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, 
 	}
 
 	// Set up list options with pagination
-	opts := metav1.ListOptions{
+	listOpts := metav1.ListOptions{
 		Limit:    ResourcesPageSize,
 		Continue: bag.PageToken(),
 	}
 
 	// Fetch pods from the Kubernetes API across all namespaces
-	l.Debug("fetching pods", zap.String("continue_token", opts.Continue))
-	resp, err := p.client.CoreV1().Pods("").List(ctx, opts)
+	l.Debug("fetching pods", zap.String("continue_token", listOpts.Continue))
+	resp, err := p.client.CoreV1().Pods("").List(ctx, listOpts)
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("failed to list pods: %w", err)
+		return nil, nil, fmt.Errorf("failed to list pods: %w", err)
 	}
 
 	// Process each pod into a Baton resource
@@ -79,10 +77,10 @@ func (p *podBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, 
 	// Calculate next page token
 	nextPageToken, err := HandleKubePagination(&resp.ListMeta, bag)
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("failed to handle pagination: %w", err)
+		return nil, nil, fmt.Errorf("failed to handle pagination: %w", err)
 	}
 
-	return rv, nextPageToken, nil, nil
+	return rv, &rs.SyncOpResults{NextPageToken: nextPageToken}, nil
 }
 
 // podResource creates a Baton resource from a Kubernetes Pod.
@@ -122,7 +120,7 @@ func podResource(pod *corev1.Pod) (*v2.Resource, error) {
 }
 
 // Entitlements returns standard verb entitlements for Pod resources.
-func (p *podBuilder) Entitlements(ctx context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
+func (p *podBuilder) Entitlements(ctx context.Context, resource *v2.Resource, _ rs.SyncOpAttrs) ([]*v2.Entitlement, *rs.SyncOpResults, error) {
 	var entitlements []*v2.Entitlement
 
 	// Add standard verb entitlements
@@ -165,12 +163,12 @@ func (p *podBuilder) Entitlements(ctx context.Context, resource *v2.Resource, _ 
 	)
 	entitlements = append(entitlements, portForwardEntitlement)
 
-	return entitlements, "", nil, nil
+	return entitlements, nil, nil
 }
 
 // Grants returns no grants for Pod resources.
-func (p *podBuilder) Grants(ctx context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
-	return nil, "", nil, nil
+func (p *podBuilder) Grants(ctx context.Context, resource *v2.Resource, _ rs.SyncOpAttrs) ([]*v2.Grant, *rs.SyncOpResults, error) {
+	return nil, nil, nil
 }
 
 // newPodBuilder creates a new pod builder.
