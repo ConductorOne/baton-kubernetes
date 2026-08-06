@@ -36,6 +36,9 @@ baton-kubernetes --sync-resource-types namespace,service_account,role,cluster_ro
 ```
 </Note>
 
+**Notes:**
+- Bindings whose subject sits in the `system:` namespace are excluded from grants. This covers groups such as `system:masters` and `system:serviceaccounts:<namespace>`, and users such as `system:kube-controller-manager` — subjects that belong to Kubernetes' own control plane. Roles and cluster roles named `system:*` are still synced; the exclusion applies to the subject side of a binding. If your cluster binds a `system:` group to real users, that binding produces no grant in C1.
+
 ## Understanding Kubernetes identity
 
 Kubernetes does not have a built-in user store. Identity is determined at authentication time by the method used to connect to the API server:
@@ -64,6 +67,23 @@ The following authentication methods are **not supported** for group membership 
 | In-cluster service account tokens | Group is always `system:serviceaccounts:<namespace>`, inferred from the token's namespace |
 
 **What this means for access reviews:** RBAC bindings to groups are fully visible. If `ClusterRole:admin` is bound to group `developers`, that grant is synced. However, the list of users in `developers` is only complete if those users authenticate via x509 client certificates whose kubeconfigs are stored as Secrets in the cluster. Users authenticating via OIDC or webhook will appear as grant targets on Roles and ClusterRoles if they have direct bindings, but not as members of their groups.
+
+## Understanding how the connector selects a cluster
+
+The connector resolves its target cluster in this order:
+
+1. **`--kubeconfig`** — the connector reads this file. The path must exist, or the connector exits with `specified kubeconfig file does not exist: <path>`.
+2. **`--server`** — with no `--kubeconfig`, the connector connects to this URL directly. Supply credentials separately with `--token`, or with `--client-certificate` and `--client-key`, or rely on an in-cluster service account.
+3. **The environment** — with neither flag set, the connector requires one of the following to be present, and the standard Kubernetes client loading rules then decide which one applies:
+   - the `KUBECONFIG` environment variable, a `:`-separated list of paths whose first existing file wins
+   - the default kubeconfig at `$HOME/.kube/config`
+   - an in-cluster service account token, mounted at `/var/run/secrets/kubernetes.io/serviceaccount/token`
+
+   When none of the three exists, the connector exits with `no kubeconfig available: <path> does not exist and no in-cluster service account found`.
+
+<Warning>
+Name the target cluster explicitly when you run the connector outside a cluster. With neither `--kubeconfig` nor `--server` set, the connector follows the current context of your default kubeconfig, which may point at a different cluster than the one you intend to sync. Confirm the context with `kubectl config current-context` before the first sync.
+</Warning>
 
 ## Before you begin
 
