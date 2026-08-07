@@ -37,7 +37,7 @@ baton-kubernetes --sync-resource-types namespace,service_account,role,cluster_ro
 </Note>
 
 **Notes:**
-- Bindings whose subject sits in the `system:` namespace are excluded from grants. This covers groups such as `system:masters` and `system:serviceaccounts:<namespace>`, and users such as `system:kube-controller-manager` — subjects that belong to Kubernetes' own control plane. Roles and cluster roles named `system:*` are still synced; the exclusion applies to the subject side of a binding. If your cluster binds a `system:` group to real users, that binding produces no grant in C1.
+- Bindings whose subject name contains `system:` are excluded from grants. This covers groups such as `system:masters` and `system:serviceaccounts:<namespace>`, and users such as `system:kube-controller-manager` — subjects that belong to Kubernetes' own control plane. Roles and cluster roles named `system:*` are still synced; the exclusion applies to the subject side of a binding. If your cluster binds a `system:` group to real users, that binding produces no grant in C1.
 
 ## Understanding Kubernetes identity
 

@@ -18,7 +18,7 @@ While developing the connector, please fill out this form. This information is n
     Two behaviours worth documenting, because neither is obvious from the resource list:
 
     - **Users and groups are derived, not enumerated.** Kubernetes has no user store. The connector materialises a principal only when an RBAC binding references it, or when it appears as the `CN` of an x509 client certificate inside a kubeconfig Secret. A user with no binding is invisible by design.
-    - **Bindings whose subject sits in the `system:` namespace produce no grants.** Roles and cluster roles named `system:*` are still synced; the exclusion applies to the subject side of a binding. If a cluster binds a `system:` group to real users, that binding does not appear as access in C1.
+    - **Bindings whose subject name contains `system:` produce no grants.** Roles and cluster roles named `system:*` are still synced; the exclusion applies to the subject side of a binding. If a cluster binds a `system:` group to real users, that binding does not appear as access in C1.
 
 2. Can the connector provision any resources? If so, which ones?
 
