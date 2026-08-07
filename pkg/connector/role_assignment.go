@@ -68,12 +68,32 @@ type roleAssignmentBuilder struct {
 	client          kubernetes.Interface
 	bindings        BindingLister
 	bindingProvider ClusterRoleBindingProvider
+	// enabled reports whether the sparse model is on. The type is registered
+	// either way so a tenant selecting it can never fail the sync's resource
+	// type validation, but with the model off cluster_role still emits the flat
+	// entitlements and grants, so emitting assignments too would count the same
+	// access twice.
+	enabled bool
 
 	// clusterRoles caches the names of existing cluster roles for one sync, so
 	// paging through assignments does not re-list them per page.
 	clusterRolesMutex sync.Mutex
 	clusterRoles      map[string]bool
 	clusterRolesSync  string
+
+	// pairs caches the sorted (cluster role, scope) list for one sync. Paging is
+	// an offset into it, so without this every page would re-copy the whole
+	// binding cache and regroup and re-sort it, making List quadratic in the
+	// number of pages on a cluster large enough to need them.
+	pairsMutex sync.Mutex
+	pairs      []assignmentPair
+	pairsSync  string
+}
+
+// assignmentPair is one (cluster role, scope) pair with the bindings behind it.
+type assignmentPair struct {
+	key          assignmentKey
+	contributors []contributingBinding
 }
 
 func (b *roleAssignmentBuilder) ResourceType(_ context.Context) *v2.ResourceType {
@@ -81,28 +101,80 @@ func (b *roleAssignmentBuilder) ResourceType(_ context.Context) *v2.ResourceType
 }
 
 // List emits one resource per (cluster role, scope) pair that has at least one
-// binding.
-//
-// Every pair is built in a single pass: the pairs come from the sync-scoped
-// binding cache, which already holds every binding, and a pair is only complete
-// once all its contributing bindings have been seen. Assembling them page by
-// page would emit the same pair repeatedly with a partial contributor list, and
-// because resources upsert on (id, sync) the last partial write would win.
-// Pagination therefore happens over the finished, sorted pairs.
+// binding, paging over that list by offset.
 func (b *roleAssignmentBuilder) List(ctx context.Context, _ *v2.ResourceId, opts rs.SyncOpAttrs) ([]*v2.Resource, *rs.SyncOpResults, error) {
 	l := ctxzap.Extract(ctx)
 
-	roleBindings, clusterRoleBindings, err := b.bindings.AllBindings(ctx, opts.SyncID)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to list bindings: %w", err)
+	if !b.enabled {
+		return nil, nil, nil
 	}
 
-	known, err := b.knownClusterRoles(ctx, opts.SyncID)
+	pairs, err := b.assignmentPairs(ctx, opts.SyncID)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	pairs := make(map[assignmentKey][]contributingBinding)
+	offset, err := parseOffsetToken(opts.PageToken.Token)
+	if err != nil {
+		return nil, nil, err
+	}
+	if offset > len(pairs) {
+		offset = len(pairs)
+	}
+	end := len(pairs)
+	if limit := pageLimit(opts.PageToken.Size); offset+limit < end {
+		end = offset + limit
+	}
+
+	var rv []*v2.Resource
+	for _, pair := range pairs[offset:end] {
+		key, contributors := pair.key, pair.contributors
+
+		resource, err := roleAssignmentResource(key, contributors)
+		if err != nil {
+			l.Error("failed to create role assignment resource",
+				zap.String("cluster_role", key.role),
+				zap.String("scope", key.scopeID),
+				zap.Error(err))
+			continue
+		}
+		rv = append(rv, resource)
+	}
+
+	if end < len(pairs) {
+		return rv, &rs.SyncOpResults{NextPageToken: strconv.Itoa(end)}, nil
+	}
+	return rv, nil, nil
+}
+
+// assignmentPairs returns this sync's (cluster role, scope) pairs, sorted.
+//
+// Built once per sync and cached: a pair is only complete once every binding
+// contributing to it has been seen, so it cannot be assembled page by page —
+// doing so would emit the same pair repeatedly with a partial contributor list,
+// and because resources upsert on (id, sync) the last partial write would win.
+// Paging is therefore an offset into this finished list, and caching keeps that
+// from re-copying and re-sorting every binding on each page.
+func (b *roleAssignmentBuilder) assignmentPairs(ctx context.Context, syncID string) ([]assignmentPair, error) {
+	b.pairsMutex.Lock()
+	defer b.pairsMutex.Unlock()
+
+	if b.pairs != nil && b.pairsSync == syncID {
+		return b.pairs, nil
+	}
+
+	l := ctxzap.Extract(ctx)
+
+	roleBindings, clusterRoleBindings, err := b.bindings.AllBindings(ctx, syncID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list bindings: %w", err)
+	}
+	known, err := b.knownClusterRoles(ctx, syncID)
+	if err != nil {
+		return nil, err
+	}
+
+	grouped := make(map[assignmentKey][]contributingBinding)
 	add := func(key assignmentKey, cb contributingBinding) {
 		if !known[key.role] {
 			// A binding may reference a cluster role that does not exist; such
@@ -114,7 +186,7 @@ func (b *roleAssignmentBuilder) List(ctx context.Context, _ *v2.ResourceId, opts
 				zap.String("cluster_role", key.role))
 			return
 		}
-		pairs[key] = append(pairs[key], cb)
+		grouped[key] = append(grouped[key], cb)
 	}
 
 	for _, crb := range clusterRoleBindings {
@@ -151,53 +223,26 @@ func (b *roleAssignmentBuilder) List(ctx context.Context, _ *v2.ResourceId, opts
 		})
 	}
 
-	keys := make([]assignmentKey, 0, len(pairs))
-	for key := range pairs {
-		keys = append(keys, key)
+	pairs := make([]assignmentPair, 0, len(grouped))
+	for key, contributors := range grouped {
+		sort.Slice(contributors, func(i, j int) bool { return contributors[i].Name < contributors[j].Name })
+		pairs = append(pairs, assignmentPair{key: key, contributors: contributors})
 	}
 	// Sorted so paging is stable across calls; map order is not.
-	sort.Slice(keys, func(i, j int) bool {
-		if keys[i].scopeType != keys[j].scopeType {
-			return keys[i].scopeType < keys[j].scopeType
+	sort.Slice(pairs, func(i, j int) bool {
+		a, c := pairs[i].key, pairs[j].key
+		if a.scopeType != c.scopeType {
+			return a.scopeType < c.scopeType
 		}
-		if keys[i].scopeID != keys[j].scopeID {
-			return keys[i].scopeID < keys[j].scopeID
+		if a.scopeID != c.scopeID {
+			return a.scopeID < c.scopeID
 		}
-		return keys[i].role < keys[j].role
+		return a.role < c.role
 	})
 
-	offset, err := parseOffsetToken(opts.PageToken.Token)
-	if err != nil {
-		return nil, nil, err
-	}
-	if offset > len(keys) {
-		offset = len(keys)
-	}
-	end := len(keys)
-	if limit := pageLimit(opts.PageToken.Size); offset+limit < end {
-		end = offset + limit
-	}
-
-	var rv []*v2.Resource
-	for _, key := range keys[offset:end] {
-		contributors := pairs[key]
-		sort.Slice(contributors, func(i, j int) bool { return contributors[i].Name < contributors[j].Name })
-
-		resource, err := roleAssignmentResource(key, contributors)
-		if err != nil {
-			l.Error("failed to create role assignment resource",
-				zap.String("cluster_role", key.role),
-				zap.String("scope", key.scopeID),
-				zap.Error(err))
-			continue
-		}
-		rv = append(rv, resource)
-	}
-
-	if end < len(keys) {
-		return rv, &rs.SyncOpResults{NextPageToken: strconv.Itoa(end)}, nil
-	}
-	return rv, nil, nil
+	b.pairs = pairs
+	b.pairsSync = syncID
+	return pairs, nil
 }
 
 // roleAssignmentObjectID builds the resource's object ID.
@@ -399,10 +444,11 @@ func pageLimit(size int) int {
 	return size
 }
 
-func newRoleAssignmentBuilder(client kubernetes.Interface, k8s *Kubernetes) *roleAssignmentBuilder {
+func newRoleAssignmentBuilder(client kubernetes.Interface, k8s *Kubernetes, enabled bool) *roleAssignmentBuilder {
 	return &roleAssignmentBuilder{
 		client:          client,
 		bindings:        k8s,
 		bindingProvider: k8s,
+		enabled:         enabled,
 	}
 }

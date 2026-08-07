@@ -67,7 +67,7 @@ func (c *clusterRoleBuilder) List(ctx context.Context, parentResourceID *v2.Reso
 
 	// Process each cluster role into a Baton resource
 	for _, clusterRole := range resp.Items {
-		resource, err := clusterRoleResource(&clusterRole)
+		resource, err := clusterRoleResource(&clusterRole, c.useRoleAssignments)
 		if err != nil {
 			l.Error("failed to create cluster role resource",
 				zap.String("name", clusterRole.Name),
@@ -86,8 +86,15 @@ func (c *clusterRoleBuilder) List(ctx context.Context, parentResourceID *v2.Reso
 	return rv, &rs.SyncOpResults{NextPageToken: nextPageToken}, nil
 }
 
-// clusterRoleResource creates a Baton resource from a Kubernetes ClusterRole.
-func clusterRoleResource(clusterRole *rbacv1.ClusterRole) (*v2.Resource, error) {
+// clusterRoleResource builds the Baton resource for a ClusterRole.
+//
+// skipEntitlementsAndGrants annotates the resource so the syncer never schedules
+// those phases for it, which is what the sparse model wants: role_assignment
+// carries that access instead. Annotating is better than returning nothing from
+// Entitlements and Grants, because the SDK checks the annotation before calling
+// (baton-sdk pkg/sync/syncer.go, shouldSkipEntitlementsAndGrants) and so skips
+// two round trips per cluster role.
+func clusterRoleResource(clusterRole *rbacv1.ClusterRole, skipEntitlementsAndGrants bool) (*v2.Resource, error) {
 	// Prepare profile with standard metadata
 	profile := map[string]interface{}{
 		profileKeyName:              clusterRole.Name,
@@ -116,12 +123,17 @@ func clusterRoleResource(clusterRole *rbacv1.ClusterRole) (*v2.Resource, error) 
 	}
 
 	// Create resource as a role - pass the name directly as the raw ID
+	resourceOpts := []rs.ResourceOption{rs.WithResourceProfile(profile)}
+	if skipEntitlementsAndGrants {
+		resourceOpts = append(resourceOpts, rs.WithAnnotation(&v2.SkipEntitlementsAndGrants{}))
+	}
+
 	resource, err := rs.NewRoleResource(
 		clusterRole.Name,
 		ResourceTypeClusterRole,
 		clusterRole.Name, // Pass the name directly as the object ID
 		nil,
-		rs.WithResourceProfile(profile),
+		resourceOpts...,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create cluster role resource: %w", err)

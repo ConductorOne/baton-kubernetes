@@ -45,6 +45,9 @@ type ConnectorOpts struct {
 	CustomSyncer  map[string]ResourceSyncerBuilder
 	// UseRoleAssignments switches cluster role access to the sparse model.
 	UseRoleAssignments bool
+	// ClusterName labels the cluster resource. Empty falls back to the API
+	// server host.
+	ClusterName string
 }
 
 // ConnectorOption is a function that configures the connector options.
@@ -80,6 +83,24 @@ func WithCustomSyncers(syncers map[string]ResourceSyncerBuilder) ConnectorOption
 func WithRoleAssignments(enabled bool) ConnectorOption {
 	return func(opts *ConnectorOpts) error {
 		opts.UseRoleAssignments = enabled
+		return nil
+	}
+}
+
+// WithClusterName sets the display name of the singleton cluster resource.
+//
+// Without it the name falls back to the API server host, which is a poor label
+// and sometimes a misleading one: an in-cluster deployment reads its host from
+// KUBERNETES_SERVICE_HOST, the ClusterIP of the kubernetes service, so every
+// such connector would call its cluster something like "10.96.0.1:443" — the
+// same string on every cluster it is meant to distinguish.
+//
+// The standalone CLI derives this from the kubeconfig. Downstream connectors
+// (baton-eks, baton-aks, baton-gke) know the real cloud cluster name and should
+// pass it.
+func WithClusterName(name string) ConnectorOption {
+	return func(opts *ConnectorOpts) error {
+		opts.ClusterName = name
 		return nil
 	}
 }
@@ -236,23 +257,47 @@ func NewFromConfig(
 	// platform-side signal only -- the SDK syncer never reads it -- so it
 	// cannot substitute for that filter locally.
 	//
-	// The sparse types are the one exception. They are a different
-	// representation of cluster role access rather than more of it, so
-	// registering them while the flag is off would let a selection enable a
-	// model the rest of the connector is not configured for.
-	syncResources := AllResourceTypeIDs
-	if cfg.UseRoleAssignments {
-		syncResources = DeclaredResourceTypeIDs()
-	}
+	// That includes the sparse types. They are declared in the capabilities
+	// manifest with OptInRequired, so a tenant can select them from the UI, and
+	// registering them conditionally would reproduce the same failure for
+	// 'role_assignment'. Their builders emit nothing while the flag is off, so
+	// registering them unconditionally leaves the flat model's output untouched.
+	syncResources := DeclaredResourceTypeIDs()
 
 	k, err := New(ctx, restConfig,
 		WithSyncResources(syncResources),
 		WithRoleAssignments(cfg.UseRoleAssignments),
+		WithClusterName(clusterNameFromConfig(opt, cfg)),
 	)
 	if err != nil {
 		return nil, nil, err
 	}
 	return k, nil, nil
+}
+
+// clusterNameFromConfig picks a human-meaningful name for the cluster resource
+// from whatever the operator supplied, preferring what they named explicitly.
+//
+// It returns "" when the kubeconfig cannot be read, which is the normal case for
+// an in-cluster deployment; the caller then falls back to the API server host,
+// and past that to a plain label.
+func clusterNameFromConfig(opt *clioptions.ConfigFlags, cfg *pkgconfig.Kubernetes) string {
+	if cfg.Cluster != "" {
+		return cfg.Cluster
+	}
+	if cfg.Context != "" {
+		return cfg.Context
+	}
+	raw, err := opt.ToRawKubeConfigLoader().RawConfig()
+	if err != nil {
+		return ""
+	}
+	// The current context's cluster is the specific thing being talked to; the
+	// context name is a reasonable second best when it names no cluster.
+	if kubeCtx, ok := raw.Contexts[raw.CurrentContext]; ok && kubeCtx.Cluster != "" {
+		return kubeCtx.Cluster
+	}
+	return raw.CurrentContext
 }
 
 // New creates a Kubernetes connector from a pre-built REST config.
@@ -340,10 +385,10 @@ func (k *Kubernetes) ResourceSyncers(ctx context.Context) []connectorbuilder.Res
 			return newClusterRoleBuilder(k.client, k, k.opts.UseRoleAssignments)
 		},
 		ResourceTypeCluster.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncerV2 {
-			return newClusterBuilder(k.config.Host)
+			return newClusterBuilder(k.opts.ClusterName, k.config.Host, k.opts.UseRoleAssignments)
 		},
 		ResourceTypeRoleAssignment.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncerV2 {
-			return newRoleAssignmentBuilder(k.client, k)
+			return newRoleAssignmentBuilder(k.client, k, k.opts.UseRoleAssignments)
 		},
 		ResourceTypeSecret.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncerV2 {
 			return newSecretBuilder(k.client)
@@ -442,8 +487,8 @@ func (d *defaultCapabilitiesBuilder) ResourceSyncers(_ context.Context) []connec
 		newServiceAccountBuilder(nil),
 		newRoleBuilder(nil, nil),
 		newClusterRoleBuilder(nil, nil, false),
-		newClusterBuilder(""),
-		newRoleAssignmentBuilder(nil, nil),
+		newClusterBuilder("", "", true),
+		newRoleAssignmentBuilder(nil, nil, true),
 		newKubeUserBuilder(nil),
 		newKubeGroupBuilder(nil),
 		newConfigMapBuilder(nil),

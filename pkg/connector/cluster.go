@@ -11,7 +11,9 @@ import (
 
 // clusterResourceID is the singleton's stable object ID. It never varies: a
 // connector instance talks to exactly one cluster, and the ID has to stay put
-// across syncs or every role assignment's scope would repoint.
+// across syncs or every role assignment's scope would repoint. In particular it
+// is deliberately not derived from the API server host, which moves when a
+// cluster is recreated or reached through a different address.
 const clusterResourceID = "cluster"
 
 // clusterBuilder syncs a single resource standing for the cluster itself.
@@ -21,25 +23,42 @@ const clusterResourceID = "cluster"
 // namespace, and a ScopeBindingTrait needs a resource to point at — C1 drops
 // the relationship when the scope resource was never synced.
 type clusterBuilder struct {
-	// host is the API server URL, used only for the display name so the resource
-	// is identifiable in a tenant with several clusters connected.
+	// name labels the resource. Empty falls back to the API server host.
+	name string
+	// host is the API server URL, the fallback label.
 	host string
+	// enabled reports whether the sparse model is on. The type is registered
+	// either way so a tenant selecting it can never fail the sync's resource
+	// type validation, but with the sparse model off there is nothing for this
+	// resource to anchor, so emitting it would add a resource the flat model
+	// never had.
+	enabled bool
 }
 
 func (c *clusterBuilder) ResourceType(_ context.Context) *v2.ResourceType {
 	return ResourceTypeCluster
 }
 
-// List returns the single cluster resource.
+// List returns the single cluster resource, or nothing when the sparse model is
+// off.
 func (c *clusterBuilder) List(_ context.Context, _ *v2.ResourceId, _ rs.SyncOpAttrs) ([]*v2.Resource, *rs.SyncOpResults, error) {
+	if !c.enabled {
+		return nil, nil, nil
+	}
+
+	displayName := clusterDisplayName(c.name, c.host)
+	profile := map[string]interface{}{
+		profileKeyName: displayName,
+	}
+	if c.host != "" {
+		profile["server"] = c.host
+	}
+
 	resource, err := rs.NewResource(
-		clusterDisplayName(c.host),
+		displayName,
 		ResourceTypeCluster,
 		clusterResourceID,
-		rs.WithResourceProfile(map[string]interface{}{
-			profileKeyName: clusterDisplayName(c.host),
-			"server":       c.host,
-		}),
+		rs.WithResourceProfile(profile),
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create cluster resource: %w", err)
@@ -47,11 +66,18 @@ func (c *clusterBuilder) List(_ context.Context, _ *v2.ResourceId, _ rs.SyncOpAt
 	return []*v2.Resource{resource}, nil, nil
 }
 
-// clusterDisplayName prefers the API server host, which is what distinguishes
-// one cluster from another to an operator. It falls back to a bare label when
-// the server URL is unusable, since a display name is cosmetic and must never
-// fail the sync.
-func clusterDisplayName(host string) string {
+// clusterDisplayName picks the most meaningful label available.
+//
+// A caller-supplied name wins: the standalone CLI takes it from the kubeconfig
+// and the cloud connectors know their own cluster's name. The API server host is
+// only a fallback, and a weak one — an in-cluster deployment sees the ClusterIP
+// of the kubernetes service there, which is the same address on most clusters.
+// When there is nothing better, a plain label beats an address that looks
+// identifying but is not.
+func clusterDisplayName(name, host string) string {
+	if name != "" {
+		return name
+	}
 	if host == "" {
 		return "Cluster"
 	}
@@ -72,12 +98,12 @@ func (c *clusterBuilder) Grants(_ context.Context, _ *v2.Resource, _ rs.SyncOpAt
 	return nil, nil, nil
 }
 
-// clusterResourceID returns the scope resource ID that cluster-wide role
+// clusterScopeResourceID returns the scope resource ID that cluster-wide role
 // assignments point at.
 func clusterScopeResourceID() *v2.ResourceId {
 	return &v2.ResourceId{ResourceType: ResourceTypeCluster.Id, Resource: clusterResourceID}
 }
 
-func newClusterBuilder(host string) *clusterBuilder {
-	return &clusterBuilder{host: host}
+func newClusterBuilder(name, host string, enabled bool) *clusterBuilder {
+	return &clusterBuilder{name: name, host: host, enabled: enabled}
 }

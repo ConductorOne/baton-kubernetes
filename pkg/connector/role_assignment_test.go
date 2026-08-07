@@ -45,7 +45,7 @@ func userSubject(name string) rbacv1.Subject {
 // Kubernetes connector so the binding cache and lookups behave as in production.
 func newRoleAssignmentFixture(objects ...runtime.Object) *roleAssignmentBuilder {
 	client := fake.NewSimpleClientset(objects...)
-	return newRoleAssignmentBuilder(client, &Kubernetes{client: client})
+	return newRoleAssignmentBuilder(client, &Kubernetes{client: client}, true)
 }
 
 // listAssignmentIDs drains List and returns the object IDs it emitted.

@@ -73,9 +73,18 @@ func DeclaredResourceTypeIDs() []string {
 	return append(append([]string{}, AllResourceTypeIDs...), SparseResourceTypeIDs...)
 }
 
-// DefaultSyncResourceTypeIDs is the core RBAC set to sync when nothing else
-// narrows the sync. The workload and configuration types are left out because
-// they expose verb entitlements that never produce grants.
+// DefaultSyncResourceTypeIDs is the set to sync when nothing else narrows the
+// sync: the core RBAC types plus the sparse ones. The workload and
+// configuration types are left out because they expose verb entitlements that
+// never produce grants.
+//
+// The sparse types have to be in here even though they only produce anything
+// when --use-role-assignments is set. This default is a package-level value
+// built before any config is parsed, so it cannot depend on that flag; leaving
+// them out filtered them away exactly when they were needed, and because
+// cluster_role suppresses its own entitlements and grants under the flag, the
+// sync then emitted no cluster role access at all. With the flag off their
+// builders emit nothing, so naming them here costs nothing.
 //
 // This is a sync *filter*, not a registration list: which types the connector
 // registers must not depend on it. See NewFromConfig.
@@ -87,6 +96,8 @@ func DefaultSyncResourceTypeIDs() []string {
 		ResourceTypeClusterRole.Id,
 		ResourceTypeKubeUser.Id,
 		ResourceTypeKubeGroup.Id,
+		ResourceTypeCluster.Id,
+		ResourceTypeRoleAssignment.Id,
 	}
 }
 

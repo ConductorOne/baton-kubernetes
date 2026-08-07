@@ -5,8 +5,10 @@ import (
 	"testing"
 
 	pkgconfig "github.com/conductorone/baton-kubernetes/pkg/config"
+	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"k8s.io/client-go/kubernetes/fake"
 )
 
 // TestNewFromConfigExplicitServerSkipsKubeconfigGuard covers the documented
@@ -78,12 +80,54 @@ func registeredResourceTypeIDs(t *testing.T, cfg *pkgconfig.Kubernetes) []string
 // manifest declares as selectable has to be registered, so no filter the
 // platform can send is ever invalid.
 func TestRegisteredResourceTypesCoverEverySelectableType(t *testing.T) {
-	assert.ElementsMatch(t, AllResourceTypeIDs, registeredResourceTypeIDs(t, &pkgconfig.Kubernetes{}),
-		"every non-sparse type a tenant can opt into must be registered")
+	assert.ElementsMatch(t, DeclaredResourceTypeIDs(), registeredResourceTypeIDs(t, &pkgconfig.Kubernetes{}),
+		"every type a tenant can opt into must be registered")
 
+	// Including the sparse types, whose builders no-op while the flag is off.
+	// Registering them conditionally would fail the same validation for
+	// 'role_assignment', since the capabilities manifest offers it to tenants.
 	assert.ElementsMatch(t, DeclaredResourceTypeIDs(),
 		registeredResourceTypeIDs(t, &pkgconfig.Kubernetes{UseRoleAssignments: true}),
-		"with the sparse model on, its types must be registered too")
+		"the registered set must not depend on the sparse flag")
+}
+
+// TestSparseBuildersEmitNothingWhenDisabled is the other half of registering the
+// sparse types unconditionally: they must stay silent while the flag is off, or
+// the flat model would gain resources it never had and cluster role access would
+// be counted twice.
+func TestSparseBuildersEmitNothingWhenDisabled(t *testing.T) {
+	ctx := context.Background()
+	client := fake.NewSimpleClientset(
+		clusterRole("view"),
+		crbFor("view-everywhere", "view", userSubject("alice")),
+	)
+
+	assignments, _, err := newRoleAssignmentBuilder(client, &Kubernetes{client: client}, false).
+		List(ctx, nil, rs.SyncOpAttrs{SyncID: "sync-1"})
+	require.NoError(t, err)
+	assert.Empty(t, assignments, "role assignments must not be emitted alongside the flat model")
+
+	clusters, _, err := newClusterBuilder("kind-test", "https://10.96.0.1:443", false).
+		List(ctx, nil, rs.SyncOpAttrs{SyncID: "sync-1"})
+	require.NoError(t, err)
+	assert.Empty(t, clusters, "the cluster anchor has nothing to anchor without role assignments")
+}
+
+// TestDefaultSyncFilterCoversTheSparseTypes pins the regression the default
+// filter caused: with --use-role-assignments on and no explicit selection, the
+// core-six filter hid role_assignment and cluster while cluster_role was already
+// suppressing its own entitlements and grants, so the sync emitted no cluster
+// role access at all.
+func TestDefaultSyncFilterCoversTheSparseTypes(t *testing.T) {
+	defaults := make(map[string]bool)
+	for _, id := range DefaultSyncResourceTypeIDs() {
+		defaults[id] = true
+	}
+
+	assert.True(t, defaults[ResourceTypeRoleAssignment.Id],
+		"the sparse model produces nothing if its own type is filtered out by default")
+	assert.True(t, defaults[ResourceTypeCluster.Id],
+		"cluster-scoped assignments need their scope resource synced or C1 drops the relationship")
 }
 
 // TestDefaultSyncFilterIsRegistered verifies the core RBAC default is expressed

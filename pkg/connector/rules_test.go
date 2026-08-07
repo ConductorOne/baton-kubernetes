@@ -130,7 +130,7 @@ func TestClusterRoleResourceAggregatedRules(t *testing.T) {
 		Verbs:     []string{"get", "list", "watch"},
 	}}
 
-	resource, err := clusterRoleResource(cr)
+	resource, err := clusterRoleResource(cr, false)
 	require.NoError(t, err)
 
 	profile := resource.GetProfile().AsMap()
