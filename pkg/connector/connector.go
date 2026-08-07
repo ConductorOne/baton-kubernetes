@@ -99,19 +99,20 @@ type Kubernetes struct {
 }
 
 // NewFromConfig creates a Kubernetes connector from the typed configuration struct.
-// It validates kubeconfig paths, builds a REST config, and assembles the
-// list of resource types to sync. This is the constructor used by the
-// standalone baton-kubernetes CLI, and its signature matches cli.NewConnector so
-// it can be handed straight to config.RunConnector.
+// It validates kubeconfig paths, builds a REST config, and registers the
+// resource syncers. This is the constructor used by the standalone
+// baton-kubernetes CLI, and its signature matches cli.NewConnector so it can be
+// handed straight to config.RunConnector.
 //
-// connectorOpts carries the runtime's --sync-resource-types selection (the SDK's
-// built-in flag, also populated by the C1 resource type selector). When the user
-// has not narrowed the selection, the default core RBAC set is synced; when they
-// have, exactly the requested types are registered.
+// It deliberately does not narrow the registered resource types by the runtime's
+// --sync-resource-types selection: that selection is not authoritative here, and
+// registering a subset breaks service mode. See the comment on syncResources
+// below. Narrowing is the sync filter's job; cmd/baton-kubernetes supplies the
+// default one.
 func NewFromConfig(
 	ctx context.Context,
 	cfg *pkgconfig.Kubernetes,
-	connectorOpts *cli.ConnectorOpts,
+	_ *cli.ConnectorOpts,
 ) (connectorbuilder.ConnectorBuilderV2, []connectorbuilder.Opt, error) {
 	opt := clioptions.NewConfigFlags(true)
 
@@ -215,43 +216,33 @@ func NewFromConfig(
 	}
 
 	// --- Assemble syncResources list ---
-	// By default only the core RBAC resource types are synced: the workload and
-	// configuration types expose verb entitlements that never produce grants,
-	// resulting in noisy partial resources in ConductorOne. An explicit
-	// --sync-resource-types selection overrides the default entirely and
-	// registers exactly the requested types.
-	syncResources := []string{
-		ResourceTypeNamespace.Id,
-		ResourceTypeServiceAccount.Id,
-		ResourceTypeRole.Id,
-		ResourceTypeClusterRole.Id,
-		ResourceTypeKubeUser.Id,
-		ResourceTypeKubeGroup.Id,
-	}
-	// The sparse types are registered only when their flag is on, so leaving it
-	// off keeps the resource set byte-identical to the flat model.
+	// Register every resource type this connector supports, unconditionally.
+	//
+	// Choosing which types actually sync is the caller's job, not the
+	// connector's. In service mode the selection arrives with each sync task
+	// ("prefer the task's resource type IDs (from the server/UI) over local
+	// config" -- baton-sdk pkg/tasks/c1api/full_sync.go), long after the
+	// connector was built from local config alone. A connector that registers
+	// only a subset therefore fails as soon as a tenant opts into anything it
+	// did not pre-register, because the SDK validates the task's filter against
+	// the types the connector advertised:
+	//
+	//	invalid resource type 'configmap' in filter
+	//
+	// The core-RBAC-only default instead lives where the selection is visible:
+	// the runner's default filter in cmd/baton-kubernetes for local runs, and
+	// the OptInRequired annotations on the workload types, which are what stop
+	// the platform offering them unless a tenant asks. OptInRequired is a
+	// platform-side signal only -- the SDK syncer never reads it -- so it
+	// cannot substitute for that filter locally.
+	//
+	// The sparse types are the one exception. They are a different
+	// representation of cluster role access rather than more of it, so
+	// registering them while the flag is off would let a selection enable a
+	// model the rest of the connector is not configured for.
+	syncResources := AllResourceTypeIDs
 	if cfg.UseRoleAssignments {
-		syncResources = append(syncResources, SparseResourceTypeIDs...)
-	}
-	if connectorOpts != nil && connectorOpts.SyncFilterIsExplicit() {
-		// Walk the connector's own type list rather than the user's slice: it
-		// filters out ids this connector does not implement and deduplicates in
-		// one step. Both matter — the SDK's env-var binding
-		// (BATON_SYNC_RESOURCE_TYPES) can deliver a value twice, and registering
-		// a duplicate resource type is a hard error in the SDK builder.
-		candidates := AllResourceTypeIDs
-		if cfg.UseRoleAssignments {
-			candidates = append(append([]string{}, AllResourceTypeIDs...), SparseResourceTypeIDs...)
-		}
-		syncResources = syncResources[:0]
-		for _, id := range candidates {
-			if connectorOpts.WillSyncResourceType(id) {
-				syncResources = append(syncResources, id)
-			}
-		}
-		if len(syncResources) == 0 {
-			return nil, nil, fmt.Errorf("sync-resource-types matched no known resource types: %v", connectorOpts.SyncResourceTypeIDs)
-		}
+		syncResources = DeclaredResourceTypeIDs()
 	}
 
 	k, err := New(ctx, restConfig,

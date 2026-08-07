@@ -73,6 +73,23 @@ func DeclaredResourceTypeIDs() []string {
 	return append(append([]string{}, AllResourceTypeIDs...), SparseResourceTypeIDs...)
 }
 
+// DefaultSyncResourceTypeIDs is the core RBAC set to sync when nothing else
+// narrows the sync. The workload and configuration types are left out because
+// they expose verb entitlements that never produce grants.
+//
+// This is a sync *filter*, not a registration list: which types the connector
+// registers must not depend on it. See NewFromConfig.
+func DefaultSyncResourceTypeIDs() []string {
+	return []string{
+		ResourceTypeNamespace.Id,
+		ResourceTypeServiceAccount.Id,
+		ResourceTypeRole.Id,
+		ResourceTypeClusterRole.Id,
+		ResourceTypeKubeUser.Id,
+		ResourceTypeKubeGroup.Id,
+	}
+}
+
 // AllResourceTypeIDs lists the resource types the flat model can sync,
 // including the opt-in workload/configuration types. The sparse types are
 // deliberately excluded: they are only registered when --use-role-assignments
