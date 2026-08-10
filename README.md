@@ -53,10 +53,37 @@ baton resources
 | DaemonSet | DaemonSet resource | — |
 | ConfigMap | ConfigMap resource | — |
 | Secret | Secret resource | — |
+| Cluster (`cluster`) | Singleton standing for the cluster itself; the scope a cluster-wide role assignment points at | — |
+| Role Assignment (`role_assignment`) | One (cluster role, scope) pair that has at least one binding — see below | `assigned` — granted to users, groups, and service accounts |
 
 Role and ClusterRole resources carry their RBAC rules in the resource profile: the structured `rules` (apiGroups, resources, resourceNames, verbs, nonResourceURLs), the unions across all rules, and a risk summary — `canModify`, `modifiableVerbs`, `modifiableVerbCount` — where a modifiable verb is any of `create, update, patch, delete, deletecollection, bind, escalate, impersonate, *`. Aggregated ClusterRoles are marked `aggregated: true`; their rules are the effective set, because the Kubernetes aggregation controller materializes them into the object.
 
 By default only the core RBAC resource types are synced (namespace, service_account, role, cluster_role, kube_user, kube_group). Workload and configuration types (node, pod, deployment, statefulset, daemonset, configmap, secret) are opt-in via the standard `--sync-resource-types` flag (`BATON_SYNC_RESOURCE_TYPES`). An explicit selection replaces the default set, so list every resource type ID you want, e.g. `--sync-resource-types namespace,service_account,role,cluster_role,kube_user,kube_group,pod`.
+
+## Cluster Role Assignments
+
+By default a ClusterRole declares one entitlement per namespace plus one cluster-wide: `all:member` and `<namespace>:member`. That is O(cluster roles × namespaces) entitlements, and nearly all of them are permanently empty — a cluster with 70 cluster roles and 50 namespaces declares ~3,500 entitlements to express a few dozen real bindings.
+
+`--use-role-assignments` (`BATON_USE_ROLE_ASSIGNMENTS`) switches to a sparse model: one `role_assignment` resource per (cluster role, scope) pair that actually has a binding, each carrying a single `assigned` entitlement. On a 71-cluster-role, 9-namespace test cluster this took 710 declared cluster role entitlements down to 54 while expressing exactly the same access.
+
+| Kubernetes object | role | scope |
+| --- | --- | --- |
+| ClusterRoleBinding | the ClusterRole | the cluster |
+| RoleBinding referencing a ClusterRole | the ClusterRole | that namespace |
+
+The two models are mutually exclusive. With the flag on, `cluster_role` stops emitting entitlements and grants, so the same access is never counted twice. Namespaced `role` resources are unaffected either way: a Role can only be bound in its own namespace, so (role, scope) is 1:1 with the Role and the sparse form would produce slightly more objects, not fewer.
+
+Because pairs are deduplicated by (cluster role, scope), several bindings granting the same cluster role in the same scope collapse into one resource. The contributing binding names, kinds and creation timestamps are kept in the resource profile under `contributingBindings`, so the individual objects behind the access stay visible. Bindings whose `roleRef` names a cluster role that does not exist are skipped — they are legal in Kubernetes and simply inert.
+
+<a id="role-assignment-opt-in"></a>
+**Both `role_assignment` and `cluster` are opt-in resource types.** If you narrow the sync with `--sync-resource-types` (or, in ConductorOne, by selecting resource types on the connector), you must include them alongside the flag, or `cluster_role` will suppress its entitlements and grants while nothing emits the assignments meant to replace them — leaving no cluster role access at all:
+
+```
+baton-kubernetes --use-role-assignments \
+  --sync-resource-types namespace,service_account,role,cluster_role,kube_user,kube_group,cluster,role_assignment
+```
+
+With no explicit selection the connector's own default already includes both, so the flag alone is enough.
 
 ## Group Membership
 
@@ -160,6 +187,7 @@ Flags:
       --disable-compression                              If true, opt-out of response compression for all requests to the server ($BATON_DISABLE_COMPRESSION)
       --external-resource-c1z string                     The path to the c1z file to sync external baton resources with ($BATON_EXTERNAL_RESOURCE_C1Z)
       --external-resource-entitlement-id-filter string   The entitlement that external users, groups must have access to sync external baton resources ($BATON_EXTERNAL_RESOURCE_ENTITLEMENT_ID_FILTER)
+      --external-resource-traits strings                 Resource type traits (e.g. "user", "group", "app") to sync and match from the external resource c1z. When unset the matcher falls back to user and group; passing this flag replaces the full set rather than adding to it. ($BATON_EXTERNAL_RESOURCE_TRAITS)
   -f, --file string                                      The path to the c1z file to sync with ($BATON_FILE) (default "sync.c1z")
       --health-check                                     Enable the HTTP health check endpoint ($BATON_HEALTH_CHECK)
       --health-check-port int                            Port for the HTTP health check endpoint ($BATON_HEALTH_CHECK_PORT) (default 8081)
@@ -186,6 +214,7 @@ Flags:
       --ticketing                                        This must be set to enable ticketing support ($BATON_TICKETING)
       --tls-server-name string                           Server name to use for server certificate validation. If it is not provided, the hostname used to contact the server is used ($BATON_TLS_SERVER_NAME)
       --token string                                     Bearer token for authentication to the API server ($BATON_TOKEN)
+      --use-role-assignments                             If true, sync each (cluster role, scope) pair that has a binding as a role assignment resource, instead of declaring one entitlement per cluster role per namespace. Namespaced roles are unaffected. ($BATON_USE_ROLE_ASSIGNMENTS)
       --user string                                      The name of the kubeconfig user to use ($BATON_USER)
   -v, --version                                          version for baton-kubernetes
       --workers int                                      The number of sync workers to use. -1 for auto-detect, 0 for sequential, >0 for parallel ($BATON_WORKERS)
