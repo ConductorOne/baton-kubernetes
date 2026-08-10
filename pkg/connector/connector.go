@@ -278,15 +278,25 @@ func NewFromConfig(
 // clusterNameFromConfig picks a human-meaningful name for the cluster resource
 // from whatever the operator supplied, preferring what they named explicitly.
 //
-// It returns "" when the kubeconfig cannot be read, which is the normal case for
-// an in-cluster deployment; the caller then falls back to the API server host,
-// and past that to a plain label.
+// It returns "" when there is no name to be had, which is the normal case for an
+// in-cluster deployment; the caller then falls back to the API server host, and
+// past that to a plain label.
 func clusterNameFromConfig(opt *clioptions.ConfigFlags, cfg *pkgconfig.Kubernetes) string {
 	if cfg.Cluster != "" {
 		return cfg.Cluster
 	}
 	if cfg.Context != "" {
 		return cfg.Context
+	}
+	// With --server the kubeconfig is not what is being talked to, and reading a
+	// name from it would be worse than reading none: RawConfig returns the merged
+	// config without overrides applied (clientcmd.DirectClientConfig.RawConfig —
+	// MergedRawConfig is the one that applies them), so a machine pointed at prod
+	// by --server while holding a stale ~/.kube/config would label the cluster
+	// after whatever that file's current context happens to be. Fall through to
+	// the host, which is at least the address in use.
+	if cfg.Server != "" {
+		return ""
 	}
 	raw, err := opt.ToRawKubeConfigLoader().RawConfig()
 	if err != nil {

@@ -58,9 +58,15 @@ var (
 	ResourceTypeGroup   = &v2.ResourceType{Id: "group", DisplayName: SubjectTypeGroup, Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_GROUP}}
 )
 
-// SparseResourceTypeIDs lists the types registered only when
-// --use-role-assignments is set. They replace the cluster_role entitlement and
-// grant surface rather than adding to it.
+// SparseResourceTypeIDs lists the types belonging to the sparse model, which
+// replaces the cluster_role entitlement and grant surface rather than adding to
+// it.
+//
+// They are registered like every other type, whatever --use-role-assignments
+// says; the flag decides only whether their builders emit anything. Registering
+// them conditionally would fail the sync outright for a tenant who selects
+// role_assignment while the flag is off, since the SDK validates the selection
+// against the registered types.
 var SparseResourceTypeIDs = []string{
 	ResourceTypeCluster.Id,
 	ResourceTypeRoleAssignment.Id,
@@ -101,10 +107,11 @@ func DefaultSyncResourceTypeIDs() []string {
 	}
 }
 
-// AllResourceTypeIDs lists the resource types the flat model can sync,
-// including the opt-in workload/configuration types. The sparse types are
-// deliberately excluded: they are only registered when --use-role-assignments
-// is set, so --sync-resource-types must not be able to select them on their own.
+// AllResourceTypeIDs lists the resource types belonging to the flat model,
+// including the opt-in workload/configuration types. The sparse types are not
+// here because they are not part of that model; they live in
+// SparseResourceTypeIDs, and DeclaredResourceTypeIDs joins the two into the set
+// the connector registers and declares.
 var AllResourceTypeIDs = []string{
 	ResourceTypeNamespace.Id,
 	ResourceTypeServiceAccount.Id,

@@ -2,12 +2,15 @@ package connector
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	pkgconfig "github.com/conductorone/baton-kubernetes/pkg/config"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	clioptions "k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
@@ -128,6 +131,46 @@ func TestDefaultSyncFilterCoversTheSparseTypes(t *testing.T) {
 		"the sparse model produces nothing if its own type is filtered out by default")
 	assert.True(t, defaults[ResourceTypeCluster.Id],
 		"cluster-scoped assignments need their scope resource synced or C1 drops the relationship")
+}
+
+// TestClusterNameIgnoresKubeconfigWhenServerIsExplicit covers the documented
+// --server plus --token setup on a machine that also happens to hold a
+// kubeconfig.
+//
+// RawConfig returns the merged kubeconfig without applying overrides, so reading
+// a name from it there would label the cluster after whichever context that file
+// points at rather than the server actually being talked to. Falling back to the
+// host is less pretty and more honest.
+func TestClusterNameIgnoresKubeconfigWhenServerIsExplicit(t *testing.T) {
+	kubeconfig := filepath.Join(t.TempDir(), "config")
+	require.NoError(t, os.WriteFile(kubeconfig, []byte(`apiVersion: v1
+kind: Config
+clusters:
+- name: stale-minikube
+  cluster: {server: https://192.168.99.100:8443}
+contexts:
+- name: stale-minikube
+  context: {cluster: stale-minikube, user: stale}
+current-context: stale-minikube
+users:
+- name: stale
+  user: {}
+`), 0o600))
+	t.Setenv("KUBECONFIG", kubeconfig)
+
+	opt := clioptions.NewConfigFlags(true)
+	opt.KubeConfig = &kubeconfig
+
+	withServer := clusterNameFromConfig(opt, &pkgconfig.Kubernetes{Server: "https://prod.example.com"})
+	assert.Empty(t, withServer, "an explicit --server must not inherit the kubeconfig's context name")
+
+	// Without --server the kubeconfig is what is being talked to, so its name is
+	// the best one available.
+	assert.Equal(t, "stale-minikube", clusterNameFromConfig(opt, &pkgconfig.Kubernetes{}))
+
+	// An explicitly named cluster always wins, --server or not.
+	assert.Equal(t, "prod",
+		clusterNameFromConfig(opt, &pkgconfig.Kubernetes{Server: "https://prod.example.com", Cluster: "prod"}))
 }
 
 // TestDefaultSyncFilterIsRegistered verifies the core RBAC default is expressed
