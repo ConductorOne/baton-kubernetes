@@ -3,6 +3,25 @@
   "resourceTypeCapabilities": [
     {
       "resourceType": {
+        "id": "cluster",
+        "displayName": "Cluster",
+        "annotations": [
+          {
+            "@type": "type.googleapis.com/c1.connector.v2.OptInRequired"
+          },
+          {
+            "@type": "type.googleapis.com/c1.connector.v2.SkipEntitlementsAndGrants"
+          }
+        ]
+      },
+      "capabilities": [
+        "CAPABILITY_SYNC"
+      ],
+      "permissions": {},
+      "optInRequired": true
+    },
+    {
+      "resourceType": {
         "id": "cluster_role",
         "displayName": "Cluster Role",
         "traits": [
@@ -142,6 +161,28 @@
         "CAPABILITY_SYNC"
       ],
       "permissions": {}
+    },
+    {
+      "resourceType": {
+        "id": "role_assignment",
+        "displayName": "Role Assignment",
+        "traits": [
+          "TRAIT_SCOPE_BINDING"
+        ],
+        "annotations": [
+          {
+            "@type": "type.googleapis.com/c1.connector.v2.OptInRequired"
+          },
+          {
+            "@type": "type.googleapis.com/c1.connector.v2.SkipEntitlements"
+          }
+        ]
+      },
+      "capabilities": [
+        "CAPABILITY_SYNC"
+      ],
+      "permissions": {},
+      "optInRequired": true
     },
     {
       "resourceType": {

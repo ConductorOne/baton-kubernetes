@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
-	"github.com/conductorone/baton-sdk/pkg/pagination"
+	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/client-go/kubernetes/fake"
@@ -49,12 +49,10 @@ func TestRoleBuilderEntitlements(t *testing.T) {
 
 	// Call Entitlements method
 	ctx := context.Background()
-	pToken := &pagination.Token{}
-	entitlements, nextPageToken, ann, err := builder.Entitlements(ctx, testResource, pToken)
+	entitlements, nextPageToken, err := builder.Entitlements(ctx, testResource, rs.SyncOpAttrs{})
 
 	// Assertions
 	require.NoError(t, err)
-	require.Nil(t, ann)
 	assert.Empty(t, nextPageToken)
 
 	// Roles should have 1 entitlements: member

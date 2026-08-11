@@ -15,10 +15,13 @@ While developing the connector, please fill out this form. This information is n
 
     Seven more are declared but excluded from the default sync, and are selectable with the standard `--sync-resource-types` flag: Nodes, Pods, Deployments, StatefulSets, DaemonSets, Secrets, ConfigMaps. They carry `OptInRequired` annotations in `baton_capabilities.json`. They expose verb entitlements (`get`, `list`, `watch`, `create`, `update`, `patch`, `delete`, and for pods also `exec` and `portforward`) that never receive grants, which is why they are opt-in rather than default.
 
-    Two behaviours worth documenting, because neither is obvious from the resource list:
+    Two more — Cluster (`cluster`) and Role assignments (`role_assignment`) — belong to the optional sparse model described below. They are always registered, but emit nothing unless `--use-role-assignments` is set, and they also carry `OptInRequired`. Fifteen resource types are declared in total.
+
+    Three behaviours worth documenting, because none is obvious from the resource list:
 
     - **Users and groups are derived, not enumerated.** Kubernetes has no user store. The connector materialises a principal only when an RBAC binding references it, or when it appears as the `CN` of an x509 client certificate inside a kubeconfig Secret. A user with no binding is invisible by design.
     - **Bindings whose subject name contains `system:` produce no grants.** Roles and cluster roles named `system:*` are still synced; the exclusion applies to the subject side of a binding. If a cluster binds a `system:` group to real users, that binding does not appear as access in C1.
+    - **Cluster role access has two mutually exclusive shapes.** By default a cluster role declares `all:member` plus one `<namespace>:member` per namespace, which is cluster roles × namespaces entitlements and nearly all of them permanently empty. With `--use-role-assignments` the connector instead emits one `role_assignment` per (cluster role, scope) pair that has a binding, each with a single `assigned` entitlement, and cluster roles stop reporting their own entitlements and grants so the access is not counted twice. Measured on a 71-cluster-role, 9-namespace test cluster: 710 declared cluster role entitlements down to 54. Namespaced roles are untouched by the setting — a role can only be bound in its own namespace, so the sparse form would not reduce anything. Note that `cluster` and `role_assignment` must also be selected if the resource type selection is narrowed, or the setting produces no cluster role access at all.
 
 2. Can the connector provision any resources? If so, which ones?
 

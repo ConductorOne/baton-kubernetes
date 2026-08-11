@@ -27,6 +27,8 @@ This connector requires network access to your Kubernetes API server. If your cl
 | DaemonSets | Opt-in | |
 | Secrets | Opt-in | |
 | ConfigMaps | Opt-in | |
+| Cluster | Opt-in | |
+| Role assignments | Opt-in | |
 
 <Note>
 Workload and configuration resource types (Nodes, Pods, Deployments, StatefulSets, DaemonSets, Secrets, ConfigMaps) are excluded from the default sync. To include them, pass the full set of resource type IDs to sync with the standard `--sync-resource-types` flag (or the `BATON_SYNC_RESOURCE_TYPES` environment variable). An explicit selection replaces the default set, so list every type you want. For example:
@@ -38,6 +40,31 @@ baton-kubernetes --sync-resource-types namespace,service_account,role,cluster_ro
 
 **Notes:**
 - Bindings whose subject name contains `system:` are excluded from grants. This covers groups such as `system:masters` and `system:serviceaccounts:<namespace>`, and users such as `system:kube-controller-manager` — subjects that belong to Kubernetes' own control plane. Roles and cluster roles named `system:*` are still synced; the exclusion applies to the subject side of a binding. If your cluster binds a `system:` group to real users, that binding produces no grant in C1.
+
+## Cluster role assignments
+
+By default, each cluster role declares one entitlement per namespace plus one cluster-wide entitlement. That is the number of cluster roles multiplied by the number of namespaces, and nearly all of those entitlements are permanently empty — a cluster with 70 cluster roles and 50 namespaces declares around 3,500 entitlements to express a few dozen real bindings.
+
+Turning on **Sync cluster role assignments** (`--use-role-assignments`, or `BATON_USE_ROLE_ASSIGNMENTS`) switches to a sparse model. Instead of every possible combination, the connector syncs one **role assignment** resource for each cluster role and scope pair that actually has a binding, each with a single `assigned` entitlement:
+
+| Kubernetes object | Role | Scope |
+| :--- | :--- | :--- |
+| ClusterRoleBinding | The cluster role | The cluster |
+| RoleBinding referencing a cluster role | The cluster role | That namespace |
+
+The **Cluster** resource is a single resource standing for the cluster itself. It exists so that cluster-wide assignments have a scope to point at.
+
+The two models are mutually exclusive. With the setting on, cluster roles stop reporting their own entitlements and grants, so the same access is never counted twice. Namespaced roles are unaffected: a role can only be bound inside its own namespace, so the sparse form would not reduce anything.
+
+Where several bindings grant the same cluster role in the same scope, they are combined into one role assignment. The names, kinds and creation timestamps of every contributing binding are kept on the resource under `contributingBindings`, so you can still see which objects produce the access.
+
+The `system:` subject exclusion above applies here too: a pair whose only subjects are `system:` users or groups is synced as a role assignment but reports no grants.
+
+<Warning>
+**Cluster** and **Role assignments** are opt-in resource types. If you also narrow which resource types the connector syncs, you must select both of them alongside this setting.
+
+If the setting is on but those two types are not selected, cluster roles stop reporting their entitlements and grants while nothing syncs the role assignments meant to replace them, and **no cluster role access is reported at all**. Leaving the resource type selection untouched avoids this — the connector's own default already includes them.
+</Warning>
 
 ## Understanding Kubernetes identity
 
@@ -328,6 +355,8 @@ Add the connector in C1 and enter the credentials you collected in the previous 
     In the **Settings** area, click **Edit** and enter:
     - **Server**: your API server URL
     - **Token**: the bearer token generated above
+
+    Optionally turn on **Sync cluster role assignments** — see [Cluster role assignments](#cluster-role-assignments) for what it changes and the resource types it needs.
     </Step>
     <Step>
     Click **Save**. The connector's label changes to **Syncing**, then **Connected**.

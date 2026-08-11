@@ -20,6 +20,7 @@ type Kubernetes struct {
 	CertificateAuthority string `mapstructure:"certificate-authority"`
 	RequestTimeout string `mapstructure:"request-timeout"`
 	DisableCompression bool `mapstructure:"disable-compression"`
+	UseRoleAssignments bool `mapstructure:"use-role-assignments"`
 }
 
 func (c *Kubernetes) findFieldByTag(tagValue string) (any, bool) {

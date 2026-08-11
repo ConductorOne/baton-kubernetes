@@ -10,6 +10,7 @@ import (
 	pkgconfig "github.com/conductorone/baton-kubernetes/pkg/config"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
+	"github.com/conductorone/baton-sdk/pkg/cli"
 	"github.com/conductorone/baton-sdk/pkg/connectorbuilder"
 	"github.com/conductorone/baton-sdk/pkg/uhttp"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
@@ -42,11 +43,16 @@ const (
 type ConnectorOpts struct {
 	SyncResources []string
 	CustomSyncer  map[string]ResourceSyncerBuilder
+	// UseRoleAssignments switches cluster role access to the sparse model.
+	UseRoleAssignments bool
+	// ClusterName labels the cluster resource. Empty falls back to the API
+	// server host.
+	ClusterName string
 }
 
 // ConnectorOption is a function that configures the connector options.
 type ConnectorOption func(*ConnectorOpts) error
-type ResourceSyncerBuilder func(*kubernetes.Interface, *Kubernetes) connectorbuilder.ResourceSyncer
+type ResourceSyncerBuilder func(*kubernetes.Interface, *Kubernetes) connectorbuilder.ResourceSyncerV2
 
 // WithSyncResources configures the connector to sync the specified resources in the list only.
 func WithSyncResources(resources []string) ConnectorOption {
@@ -64,16 +70,39 @@ func WithCustomSyncers(syncers map[string]ResourceSyncerBuilder) ConnectorOption
 	}
 }
 
-// secretsScanResult is the sealed result produced by kubeUserBuilder.List() Phase 3.
-// It is built page-by-page into secretsAccumulator and sealed on the last secrets page.
-// kubeGroupBuilder.Grants() reads secretsResult directly — no independent scanning.
-type secretsScanResult struct {
-	// Usernames holds deduplicated x509 CommonNames.
-	// Only non-empty CNs are included (matching original kubeUserBuilder Phase 3 behavior).
-	Usernames []string
-	// GroupMembers maps Kubernetes group name (x509 Organization field) to principal names.
-	// Falls back to the kubeconfig username key when CN is empty (preserving original Grants behavior).
-	GroupMembers map[string][]string
+// WithRoleAssignments switches cluster role access from the flat model to the
+// sparse one: instead of declaring an entitlement per cluster role per
+// namespace, the connector emits one role_assignment resource per
+// (cluster role, scope) pair that actually has a binding.
+//
+// The two are mutually exclusive. With this on, cluster_role stops emitting
+// entitlements and grants, so the same access is never counted twice.
+// Namespaced roles are untouched: a Role can only be bound in its own
+// namespace, so (role, scope) is 1:1 with the Role and the sparse form would
+// produce slightly more objects, not fewer.
+func WithRoleAssignments(enabled bool) ConnectorOption {
+	return func(opts *ConnectorOpts) error {
+		opts.UseRoleAssignments = enabled
+		return nil
+	}
+}
+
+// WithClusterName sets the display name of the singleton cluster resource.
+//
+// Without it the name falls back to the API server host, which is a poor label
+// and sometimes a misleading one: an in-cluster deployment reads its host from
+// KUBERNETES_SERVICE_HOST, the ClusterIP of the kubernetes service, so every
+// such connector would call its cluster something like "10.96.0.1:443" — the
+// same string on every cluster it is meant to distinguish.
+//
+// The standalone CLI derives this from the kubeconfig. Downstream connectors
+// (baton-eks, baton-aks, baton-gke) know the real cloud cluster name and should
+// pass it.
+func WithClusterName(name string) ConnectorOption {
+	return func(opts *ConnectorOpts) error {
+		opts.ClusterName = name
+		return nil
+	}
 }
 
 // Kubernetes connector struct.
@@ -82,37 +111,39 @@ type Kubernetes struct {
 	config *rest.Config
 	opts   ConnectorOpts
 
-	// Shared binding caches
+	// Shared binding caches, valid only for the sync identified by bindingsSyncID.
 	roleBindingsCache        []rbacv1.RoleBinding
 	clusterRoleBindingsCache []rbacv1.ClusterRoleBinding
 	bindingsMutex            sync.RWMutex
 	bindingsLoaded           bool
-
-	// Secrets scan cache: written by kubeUserBuilder Phase 3, read by kubeGroupBuilder Grants.
-	secretsAccumulator *secretsScanResult // live during Phase 3 pagination
-	secretsResult      *secretsScanResult // sealed after Phase 3 last page; read-only thereafter
-	secretsMu          sync.RWMutex
+	bindingsSyncID           string
 }
 
 // NewFromConfig creates a Kubernetes connector from the typed configuration struct.
-// It validates kubeconfig paths, builds a REST config, and assembles the
-// list of resource types to sync. This is the constructor used by the
-// standalone baton-kubernetes CLI.
+// It validates kubeconfig paths, builds a REST config, and registers the
+// resource syncers. This is the constructor used by the standalone
+// baton-kubernetes CLI, and its signature matches cli.NewConnector so it can be
+// handed straight to config.RunConnector.
 //
-// syncResourceTypes is the user's --sync-resource-types selection (the SDK's
-// built-in flag, also populated by the C1 resource type selector). When empty,
-// the default core RBAC set is synced; when set, exactly the requested types
-// are registered.
-func NewFromConfig(ctx context.Context, cfg *pkgconfig.Kubernetes, syncResourceTypes []string) (*Kubernetes, error) {
+// It deliberately does not narrow the registered resource types by the runtime's
+// --sync-resource-types selection: that selection is not authoritative here, and
+// registering a subset breaks service mode. See the comment on syncResources
+// below. Narrowing is the sync filter's job; cmd/baton-kubernetes supplies the
+// default one.
+func NewFromConfig(
+	ctx context.Context,
+	cfg *pkgconfig.Kubernetes,
+	_ *cli.ConnectorOpts,
+) (connectorbuilder.ConnectorBuilderV2, []connectorbuilder.Opt, error) {
 	opt := clioptions.NewConfigFlags(true)
 
 	// --- Kubeconfig source resolution ---
 	if cfg.Kubeconfig != "" {
 		if _, err := os.Stat(cfg.Kubeconfig); err != nil {
 			if os.IsNotExist(err) {
-				return nil, fmt.Errorf("specified kubeconfig file does not exist: %s", cfg.Kubeconfig)
+				return nil, nil, fmt.Errorf("specified kubeconfig file does not exist: %s", cfg.Kubeconfig)
 			}
-			return nil, fmt.Errorf("error accessing kubeconfig file: %w", err)
+			return nil, nil, fmt.Errorf("error accessing kubeconfig file: %w", err)
 		}
 		opt.KubeConfig = pointer.To(cfg.Kubeconfig)
 	} else if cfg.Server == "" {
@@ -144,7 +175,7 @@ func NewFromConfig(ctx context.Context, cfg *pkgconfig.Kubernetes, syncResourceT
 		_, defaultErr := os.Stat(defaultKubeconfig)
 		_, inClusterErr := os.Stat(inClusterTokenPath)
 		if !envHasKubeconfig && os.IsNotExist(defaultErr) && os.IsNotExist(inClusterErr) {
-			return nil, fmt.Errorf("no kubeconfig available: %s does not exist and no in-cluster service account found; "+
+			return nil, nil, fmt.Errorf("no kubeconfig available: %s does not exist and no in-cluster service account found; "+
 				"provide a kubeconfig via --kubeconfig or the KUBECONFIG environment variable", defaultKubeconfig)
 		}
 	}
@@ -198,53 +229,85 @@ func NewFromConfig(ctx context.Context, cfg *pkgconfig.Kubernetes, syncResourceT
 	restConfig, err := opt.ToRESTConfig()
 	if err != nil {
 		l.Error("error creating rest config", zap.Error(err))
-		return nil, fmt.Errorf("failed to create Kubernetes REST config: %w. Ensure you have a valid kubeconfig file or in-cluster configuration", err)
+		return nil, nil, fmt.Errorf("failed to create Kubernetes REST config: %w. Ensure you have a valid kubeconfig file or in-cluster configuration", err)
 	}
 	if restConfig == nil {
 		l.Error("unexpectedly got nil REST config")
-		return nil, fmt.Errorf("failed to create Kubernetes REST config: unexpectedly got nil config")
+		return nil, nil, fmt.Errorf("failed to create Kubernetes REST config: unexpectedly got nil config")
 	}
 
 	// --- Assemble syncResources list ---
-	// By default only the core RBAC resource types are synced: the workload and
-	// configuration types expose verb entitlements that never produce grants,
-	// resulting in noisy partial resources in ConductorOne. An explicit
-	// --sync-resource-types selection overrides the default entirely and
-	// registers exactly the requested types.
-	syncResources := []string{
-		ResourceTypeNamespace.Id,
-		ResourceTypeServiceAccount.Id,
-		ResourceTypeRole.Id,
-		ResourceTypeClusterRole.Id,
-		ResourceTypeKubeUser.Id,
-		ResourceTypeKubeGroup.Id,
-	}
-	if len(syncResourceTypes) > 0 {
-		knownTypes := make(map[string]bool, len(AllResourceTypeIDs))
-		for _, id := range AllResourceTypeIDs {
-			knownTypes[id] = true
-		}
-		// Deduplicate: users may repeat entries, and the SDK's env-var binding
-		// (BATON_SYNC_RESOURCE_TYPES) can deliver the same value twice.
-		seen := make(map[string]bool, len(syncResourceTypes))
-		syncResources = syncResources[:0]
-		for _, id := range syncResourceTypes {
-			if !knownTypes[id] {
-				ctxzap.Extract(ctx).Debug("ignoring unknown resource type in sync-resource-types", zap.String("resource_type", id))
-				continue
-			}
-			if seen[id] {
-				continue
-			}
-			seen[id] = true
-			syncResources = append(syncResources, id)
-		}
-		if len(syncResources) == 0 {
-			return nil, fmt.Errorf("sync-resource-types matched no known resource types: %v", syncResourceTypes)
-		}
-	}
+	// Register every resource type this connector supports, unconditionally.
+	//
+	// Choosing which types actually sync is the caller's job, not the
+	// connector's. In service mode the selection arrives with each sync task
+	// ("prefer the task's resource type IDs (from the server/UI) over local
+	// config" -- baton-sdk pkg/tasks/c1api/full_sync.go), long after the
+	// connector was built from local config alone. A connector that registers
+	// only a subset therefore fails as soon as a tenant opts into anything it
+	// did not pre-register, because the SDK validates the task's filter against
+	// the types the connector advertised:
+	//
+	//	invalid resource type 'configmap' in filter
+	//
+	// The core-RBAC-only default instead lives where the selection is visible:
+	// the runner's default filter in cmd/baton-kubernetes for local runs, and
+	// the OptInRequired annotations on the workload types, which are what stop
+	// the platform offering them unless a tenant asks. OptInRequired is a
+	// platform-side signal only -- the SDK syncer never reads it -- so it
+	// cannot substitute for that filter locally.
+	//
+	// That includes the sparse types. They are declared in the capabilities
+	// manifest with OptInRequired, so a tenant can select them from the UI, and
+	// registering them conditionally would reproduce the same failure for
+	// 'role_assignment'. Their builders emit nothing while the flag is off, so
+	// registering them unconditionally leaves the flat model's output untouched.
+	syncResources := DeclaredResourceTypeIDs()
 
-	return New(ctx, restConfig, WithSyncResources(syncResources))
+	k, err := New(ctx, restConfig,
+		WithSyncResources(syncResources),
+		WithRoleAssignments(cfg.UseRoleAssignments),
+		WithClusterName(clusterNameFromConfig(opt, cfg)),
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+	return k, nil, nil
+}
+
+// clusterNameFromConfig picks a human-meaningful name for the cluster resource
+// from whatever the operator supplied, preferring what they named explicitly.
+//
+// It returns "" when there is no name to be had, which is the normal case for an
+// in-cluster deployment; the caller then falls back to the API server host, and
+// past that to a plain label.
+func clusterNameFromConfig(opt *clioptions.ConfigFlags, cfg *pkgconfig.Kubernetes) string {
+	if cfg.Cluster != "" {
+		return cfg.Cluster
+	}
+	if cfg.Context != "" {
+		return cfg.Context
+	}
+	// With --server the kubeconfig is not what is being talked to, and reading a
+	// name from it would be worse than reading none: RawConfig returns the merged
+	// config without overrides applied (clientcmd.DirectClientConfig.RawConfig —
+	// MergedRawConfig is the one that applies them), so a machine pointed at prod
+	// by --server while holding a stale ~/.kube/config would label the cluster
+	// after whatever that file's current context happens to be. Fall through to
+	// the host, which is at least the address in use.
+	if cfg.Server != "" {
+		return ""
+	}
+	raw, err := opt.ToRawKubeConfigLoader().RawConfig()
+	if err != nil {
+		return ""
+	}
+	// The current context's cluster is the specific thing being talked to; the
+	// context name is a reasonable second best when it names no cluster.
+	if kubeCtx, ok := raw.Contexts[raw.CurrentContext]; ok && kubeCtx.Cluster != "" {
+		return kubeCtx.Cluster
+	}
+	return raw.CurrentContext
 }
 
 // New creates a Kubernetes connector from a pre-built REST config.
@@ -316,51 +379,57 @@ func New(ctx context.Context, cfg *rest.Config, opts ...ConnectorOption) (*Kuber
 }
 
 // ResourceSyncers returns the resource syncers for the Kubernetes connector.
-func (k *Kubernetes) ResourceSyncers(ctx context.Context) []connectorbuilder.ResourceSyncer {
+func (k *Kubernetes) ResourceSyncers(ctx context.Context) []connectorbuilder.ResourceSyncerV2 {
 	// Map resource type IDs to their builder functions
 	builders := map[string]ResourceSyncerBuilder{
-		ResourceTypeNamespace.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncer {
+		ResourceTypeNamespace.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncerV2 {
 			return newNamespaceBuilder(k.client)
 		},
-		ResourceTypeServiceAccount.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncer {
+		ResourceTypeServiceAccount.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncerV2 {
 			return newServiceAccountBuilder(k.client)
 		},
-		ResourceTypeRole.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncer {
+		ResourceTypeRole.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncerV2 {
 			return newRoleBuilder(k.client, k)
 		},
-		ResourceTypeClusterRole.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncer {
-			return newClusterRoleBuilder(k.client, k)
+		ResourceTypeClusterRole.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncerV2 {
+			return newClusterRoleBuilder(k.client, k, k.opts.UseRoleAssignments)
 		},
-		ResourceTypeSecret.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncer {
+		ResourceTypeCluster.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncerV2 {
+			return newClusterBuilder(k.opts.ClusterName, k.config.Host, k.opts.UseRoleAssignments)
+		},
+		ResourceTypeRoleAssignment.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncerV2 {
+			return newRoleAssignmentBuilder(k.client, k, k.opts.UseRoleAssignments)
+		},
+		ResourceTypeSecret.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncerV2 {
 			return newSecretBuilder(k.client)
 		},
-		ResourceTypeConfigMap.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncer {
+		ResourceTypeConfigMap.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncerV2 {
 			return newConfigMapBuilder(k.client)
 		},
-		ResourceTypeNode.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncer {
+		ResourceTypeNode.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncerV2 {
 			return newNodeBuilder(k.client)
 		},
-		ResourceTypeDeployment.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncer {
+		ResourceTypeDeployment.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncerV2 {
 			return newDeploymentBuilder(k.client)
 		},
-		ResourceTypeStatefulSet.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncer {
+		ResourceTypeStatefulSet.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncerV2 {
 			return newStatefulSetBuilder(k.client)
 		},
-		ResourceTypeDaemonSet.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncer {
+		ResourceTypeDaemonSet.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncerV2 {
 			return newDaemonSetBuilder(k.client)
 		},
-		ResourceTypePod.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncer {
+		ResourceTypePod.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncerV2 {
 			return newPodBuilder(k.client)
 		},
-		ResourceTypeKubeUser.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncer {
-			return newKubeUserBuilder(k.client, k)
+		ResourceTypeKubeUser.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncerV2 {
+			return newKubeUserBuilder(k.client)
 		},
-		ResourceTypeKubeGroup.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncer {
-			return newKubeGroupBuilder(k.client, k)
+		ResourceTypeKubeGroup.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncerV2 {
+			return newKubeGroupBuilder(k.client)
 		},
 	}
 
-	var syncers []connectorbuilder.ResourceSyncer
+	var syncers []connectorbuilder.ResourceSyncerV2
 
 	// Override dafault syncers with custom from opts if exists.
 	if k.opts.CustomSyncer != nil {
@@ -405,7 +474,7 @@ func (k *Kubernetes) Metadata(ctx context.Context) (*v2.ConnectorMetadata, error
 //
 // It needs no Kubernetes client: capabilities generation only reads each
 // syncer's ResourceType and checks which optional interfaces it implements.
-func DefaultCapabilitiesBuilder() connectorbuilder.ConnectorBuilder {
+func DefaultCapabilitiesBuilder() connectorbuilder.ConnectorBuilderV2 {
 	return &defaultCapabilitiesBuilder{}
 }
 
@@ -422,14 +491,16 @@ func (d *defaultCapabilitiesBuilder) Validate(_ context.Context) (annotations.An
 	return nil, nil
 }
 
-func (d *defaultCapabilitiesBuilder) ResourceSyncers(_ context.Context) []connectorbuilder.ResourceSyncer {
-	return []connectorbuilder.ResourceSyncer{
+func (d *defaultCapabilitiesBuilder) ResourceSyncers(_ context.Context) []connectorbuilder.ResourceSyncerV2 {
+	return []connectorbuilder.ResourceSyncerV2{
 		newNamespaceBuilder(nil),
 		newServiceAccountBuilder(nil),
 		newRoleBuilder(nil, nil),
-		newClusterRoleBuilder(nil, nil),
-		newKubeUserBuilder(nil, nil),
-		newKubeGroupBuilder(nil, nil),
+		newClusterRoleBuilder(nil, nil, false),
+		newClusterBuilder("", "", true),
+		newRoleAssignmentBuilder(nil, nil, true),
+		newKubeUserBuilder(nil),
+		newKubeGroupBuilder(nil),
 		newConfigMapBuilder(nil),
 		newSecretBuilder(nil),
 		newPodBuilder(nil),
@@ -459,28 +530,25 @@ func (k *Kubernetes) Validate(ctx context.Context) (annotations.Annotations, err
 	return nil, nil
 }
 
-// invalidateBindingsCaches drops the cached RoleBindings and ClusterRoleBindings
-// so the next Grants call reloads them from the API.
+// loadBindingsCaches ensures that both binding caches hold data for the given
+// sync, reloading them from the API when they were populated by an earlier one.
 //
-// The caches are scoped to a single sync, but the Kubernetes struct lives for the
-// whole process. In service mode that means a cache loaded during the first sync
-// would otherwise be reused forever, freezing every role and cluster role grant
-// at the state of the first sync. The role and cluster role builders call this
-// when they begin listing (empty page token), which always precedes the grants
-// phase of that sync.
-func (k *Kubernetes) invalidateBindingsCaches() {
-	k.bindingsMutex.Lock()
-	defer k.bindingsMutex.Unlock()
-	k.roleBindingsCache = nil
-	k.clusterRoleBindingsCache = nil
-	k.bindingsLoaded = false
-}
-
-// loadBindingsCaches ensures that both binding caches are loaded
-// It uses a mutex to ensure thread safety.
-func (k *Kubernetes) loadBindingsCaches(ctx context.Context) error {
+// The caches are scoped to a single sync, but the Kubernetes struct lives for
+// the whole process. In service mode a cache loaded during the first sync would
+// otherwise be reused forever, freezing every role and cluster role grant at the
+// state of that first sync — add a RoleBinding and no later sync notices.
+//
+// Keying on the sync ID makes that invalidation a property of this shared code
+// path. An earlier fix hooked it into roleBuilder.List and clusterRoleBuilder.List
+// instead, which cannot work for the downstream connectors (baton-eks, baton-aks,
+// baton-gke): they replace both builders through WithCustomSyncers while still
+// resolving grants through these caches, so the hook never ran for them.
+//
+// An empty sync ID (no active sync, e.g. a direct library call) caches under ""
+// and behaves as before — there is no identifier to distinguish callers by.
+func (k *Kubernetes) loadBindingsCaches(ctx context.Context, syncID string) error {
 	k.bindingsMutex.RLock()
-	if k.bindingsLoaded {
+	if k.bindingsLoaded && k.bindingsSyncID == syncID {
 		k.bindingsMutex.RUnlock()
 		return nil
 	}
@@ -491,7 +559,7 @@ func (k *Kubernetes) loadBindingsCaches(ctx context.Context) error {
 	defer k.bindingsMutex.Unlock()
 
 	// Double-check pattern
-	if k.bindingsLoaded {
+	if k.bindingsLoaded && k.bindingsSyncID == syncID {
 		return nil
 	}
 
@@ -553,6 +621,7 @@ func (k *Kubernetes) loadBindingsCaches(ctx context.Context) error {
 	k.roleBindingsCache = allRoleBindings
 	k.clusterRoleBindingsCache = allClusterRoleBindings
 	k.bindingsLoaded = true
+	k.bindingsSyncID = syncID
 	l.Debug("bindings caches loaded",
 		zap.Int("roleBindings", len(allRoleBindings)),
 		zap.Int("clusterRoleBindings", len(allClusterRoleBindings)))
@@ -560,10 +629,39 @@ func (k *Kubernetes) loadBindingsCaches(ctx context.Context) error {
 	return nil
 }
 
+// AllBindings returns every RoleBinding and ClusterRoleBinding in the cluster,
+// loading the shared cache for this sync if needed.
+//
+// The role assignment builder needs the whole set at once because it groups
+// bindings by (cluster role, scope): a pair is only complete once every binding
+// contributing to it has been seen, so it cannot be assembled from the
+// per-role lookups the other builders use.
+func (k *Kubernetes) AllBindings(ctx context.Context, syncID string) ([]rbacv1.RoleBinding, []rbacv1.ClusterRoleBinding, error) {
+	if err := k.loadBindingsCaches(ctx, syncID); err != nil {
+		return nil, nil, fmt.Errorf("failed to load bindings cache: %w", err)
+	}
+
+	k.bindingsMutex.RLock()
+	defer k.bindingsMutex.RUnlock()
+
+	// Copy: callers must not observe later mutation of the cache, and the caller
+	// here outlives the read lock.
+	roleBindings := make([]rbacv1.RoleBinding, len(k.roleBindingsCache))
+	copy(roleBindings, k.roleBindingsCache)
+	clusterRoleBindings := make([]rbacv1.ClusterRoleBinding, len(k.clusterRoleBindingsCache))
+	copy(clusterRoleBindings, k.clusterRoleBindingsCache)
+
+	return roleBindings, clusterRoleBindings, nil
+}
+
 // GetMatchingRoleBindings returns all RoleBindings that reference the specified Role.
-func (k *Kubernetes) GetMatchingRoleBindings(ctx context.Context, namespace, roleName string) ([]rbacv1.RoleBinding, error) {
+//
+// syncID scopes the shared binding cache; pass resource.SyncOpAttrs.SyncID from
+// the calling sync operation so a long-lived connector does not serve one sync's
+// bindings to the next.
+func (k *Kubernetes) GetMatchingRoleBindings(ctx context.Context, syncID, namespace, roleName string) ([]rbacv1.RoleBinding, error) {
 	// Ensure bindings cache is loaded
-	if err := k.loadBindingsCaches(ctx); err != nil {
+	if err := k.loadBindingsCaches(ctx, syncID); err != nil {
 		return nil, fmt.Errorf("failed to load bindings cache: %w", err)
 	}
 
@@ -582,9 +680,11 @@ func (k *Kubernetes) GetMatchingRoleBindings(ctx context.Context, namespace, rol
 }
 
 // GetMatchingBindingsForClusterRole returns all RoleBindings and ClusterRoleBindings that reference the specified ClusterRole.
-func (k *Kubernetes) GetMatchingBindingsForClusterRole(ctx context.Context, clusterRoleName string) ([]rbacv1.RoleBinding, []rbacv1.ClusterRoleBinding, error) {
+//
+// syncID scopes the shared binding cache; see GetMatchingRoleBindings.
+func (k *Kubernetes) GetMatchingBindingsForClusterRole(ctx context.Context, syncID, clusterRoleName string) ([]rbacv1.RoleBinding, []rbacv1.ClusterRoleBinding, error) {
 	// Ensure bindings cache is loaded
-	if err := k.loadBindingsCaches(ctx); err != nil {
+	if err := k.loadBindingsCaches(ctx, syncID); err != nil {
 		return nil, nil, fmt.Errorf("failed to load bindings cache: %w", err)
 	}
 

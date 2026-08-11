@@ -25,6 +25,10 @@ const (
 	FlagTimeout            = "request-timeout"
 	FlagDisableCompression = "disable-compression"
 	FlagKubeconfig         = "kubeconfig"
+
+	// FlagUseRoleAssignments is this connector's own flag, not one of
+	// cli-runtime's.
+	FlagUseRoleAssignments = "use-role-assignments"
 )
 
 var (
@@ -108,6 +112,19 @@ var (
 		field.WithDescription("If true, opt-out of response compression for all requests to the server"),
 		field.WithDefaultValue(false),
 	)
+	// useRoleAssignmentsField switches cluster role access from the flat model
+	// to the sparse one. The two are mutually exclusive by construction: with it
+	// on, cluster_role stops emitting entitlements and grants and the same access
+	// is expressed as role_assignment resources, so it is never counted twice.
+	useRoleAssignmentsField = field.BoolField(
+		FlagUseRoleAssignments,
+		field.WithDisplayName("Sync cluster role assignments"),
+		field.WithDescription(
+			"If true, sync each (cluster role, scope) pair that has a binding as a role assignment resource,"+
+				" instead of declaring one entitlement per cluster role per namespace."+
+				" Namespaced roles are unaffected."),
+		field.WithDefaultValue(false),
+	)
 )
 
 // ConfigurationFields lists all connector-specific schema fields.
@@ -128,6 +145,7 @@ var ConfigurationFields = []field.SchemaField{
 	caFileField,
 	timeoutField,
 	disableCompressionField,
+	useRoleAssignmentsField,
 }
 
 // ConfigRelations lists mutual-exclusivity and required-together constraints.

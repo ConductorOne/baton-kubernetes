@@ -2,17 +2,11 @@ package main
 
 import (
 	"context"
-	"fmt"
-	"os"
 
 	pkgconfig "github.com/conductorone/baton-kubernetes/pkg/config"
 	"github.com/conductorone/baton-kubernetes/pkg/connector"
 	sdkconfig "github.com/conductorone/baton-sdk/pkg/config"
-	"github.com/conductorone/baton-sdk/pkg/connectorbuilder"
 	"github.com/conductorone/baton-sdk/pkg/connectorrunner"
-	"github.com/conductorone/baton-sdk/pkg/types"
-	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
 var version = "dev"
@@ -20,39 +14,30 @@ var version = "dev"
 func main() {
 	ctx := context.Background()
 
-	// The SDK's built-in --sync-resource-types flag is not part of the connector
-	// schema struct, so it is read from viper at connector construction time.
-	var v *viper.Viper
-	getConnector := func(ctx context.Context, cfg *pkgconfig.Kubernetes) (types.ConnectorServer, error) {
-		k, err := connector.NewFromConfig(ctx, cfg, v.GetStringSlice("sync-resource-types"))
-		if err != nil {
-			return nil, err
-		}
-		return connectorbuilder.NewConnector(ctx, k)
-	}
-
-	var cmd *cobra.Command
-	var err error
-	v, cmd, err = sdkconfig.DefineConfiguration(
+	sdkconfig.RunConnector(
 		ctx,
 		"baton-kubernetes",
-		getConnector,
+		version,
 		pkgconfig.Configuration,
+		connector.NewFromConfig,
+		// The x509 scan behind kube_group membership is accumulated across the
+		// pages of one sync and read back in a later phase by another builder, so
+		// it needs a store that outlives a single process.
+		connectorrunner.WithSessionStoreEnabled(),
+		// Sync only the core RBAC types unless told otherwise. This is a filter
+		// rather than a narrower set of registered syncers, because the connector
+		// must advertise every type it supports or the platform's own selection
+		// fails validation -- see NewFromConfig.
+		//
+		// It is the weakest of the three sources, which is what makes it safe:
+		// the SDK appends its own --sync-resource-types option after this one
+		// when the flag is set, and in service mode the per-task selection from
+		// the C1 UI takes precedence over local config. So this only decides the
+		// bare local default.
+		connectorrunner.WithSyncResourceTypeIDs(connector.DefaultSyncResourceTypeIDs()),
 		// The capabilities sub-command uses a client-free builder that declares
 		// every resource type, so the generated manifest is complete even though
 		// the default sync registers only the core RBAC types.
-		connectorrunner.WithDefaultCapabilitiesConnectorBuilder(connector.DefaultCapabilitiesBuilder()),
+		connectorrunner.WithDefaultCapabilitiesConnectorBuilderV2(connector.DefaultCapabilitiesBuilder()),
 	)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err.Error())
-		os.Exit(1)
-	}
-
-	cmd.Version = version
-
-	err = cmd.Execute()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err.Error())
-		os.Exit(1)
-	}
 }

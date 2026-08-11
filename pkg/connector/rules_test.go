@@ -130,7 +130,7 @@ func TestClusterRoleResourceAggregatedRules(t *testing.T) {
 		Verbs:     []string{"get", "list", "watch"},
 	}}
 
-	resource, err := clusterRoleResource(cr)
+	resource, err := clusterRoleResource(cr, false)
 	require.NoError(t, err)
 
 	profile := resource.GetProfile().AsMap()
@@ -187,6 +187,7 @@ func TestDefaultCapabilitiesBuilder(t *testing.T) {
 	for _, s := range syncers {
 		got = append(got, s.ResourceType(ctx).GetId())
 	}
-	assert.ElementsMatch(t, AllResourceTypeIDs, got,
-		"the capabilities builder must declare exactly the connector's full resource type surface")
+	assert.ElementsMatch(t, DeclaredResourceTypeIDs(), got,
+		"the capabilities builder must declare exactly the connector's full resource type surface, "+
+			"including the sparse types that only register when --use-role-assignments is set")
 }
