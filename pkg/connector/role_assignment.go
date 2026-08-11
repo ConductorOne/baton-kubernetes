@@ -2,9 +2,9 @@ package connector
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
-	"strconv"
 	"sync"
 
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -61,6 +61,18 @@ type assignmentKey struct {
 	role      string
 }
 
+// less orders pairs for paging. Shared by the sort and the resume search so the
+// two can never disagree about what "the next pair" means.
+func (k assignmentKey) less(other assignmentKey) bool {
+	if k.scopeType != other.scopeType {
+		return k.scopeType < other.scopeType
+	}
+	if k.scopeID != other.scopeID {
+		return k.scopeID < other.scopeID
+	}
+	return k.role < other.role
+}
+
 // roleAssignmentBuilder syncs (cluster role, scope) pairs that actually have a
 // binding, replacing the O(cluster roles x namespaces) entitlement surface the
 // flat model declares.
@@ -81,10 +93,10 @@ type roleAssignmentBuilder struct {
 	clusterRoles      map[string]bool
 	clusterRolesSync  string
 
-	// pairs caches the sorted (cluster role, scope) list for one sync. Paging is
-	// an offset into it, so without this every page would re-copy the whole
-	// binding cache and regroup and re-sort it, making List quadratic in the
-	// number of pages on a cluster large enough to need them.
+	// pairs caches the sorted (cluster role, scope) list for one sync. Every page
+	// searches it, so without this each one would re-copy the whole binding cache
+	// and regroup and re-sort it, making List quadratic in the number of pages on
+	// a cluster large enough to need them.
 	pairsMutex sync.Mutex
 	pairs      []assignmentPair
 	pairsSync  string
@@ -101,7 +113,7 @@ func (b *roleAssignmentBuilder) ResourceType(_ context.Context) *v2.ResourceType
 }
 
 // List emits one resource per (cluster role, scope) pair that has at least one
-// binding, paging over that list by offset.
+// binding, paging over that list by cursor.
 func (b *roleAssignmentBuilder) List(ctx context.Context, _ *v2.ResourceId, opts rs.SyncOpAttrs) ([]*v2.Resource, *rs.SyncOpResults, error) {
 	l := ctxzap.Extract(ctx)
 
@@ -114,12 +126,16 @@ func (b *roleAssignmentBuilder) List(ctx context.Context, _ *v2.ResourceId, opts
 		return nil, nil, err
 	}
 
-	offset, err := parseOffsetToken(opts.PageToken.Token)
+	cursor, err := parseAssignmentCursor(opts.PageToken.Token)
 	if err != nil {
 		return nil, nil, err
 	}
-	if offset > len(pairs) {
-		offset = len(pairs)
+	offset := 0
+	if cursor != nil {
+		// First pair strictly after the last one emitted. The list is sorted, so
+		// this resumes correctly even though it was rebuilt from cluster state
+		// that may have changed since the previous page.
+		offset = sort.Search(len(pairs), func(i int) bool { return cursor.less(pairs[i].key) })
 	}
 	end := len(pairs)
 	if limit := pageLimit(opts.PageToken.Size); offset+limit < end {
@@ -142,7 +158,11 @@ func (b *roleAssignmentBuilder) List(ctx context.Context, _ *v2.ResourceId, opts
 	}
 
 	if end < len(pairs) {
-		return rv, &rs.SyncOpResults{NextPageToken: strconv.Itoa(end)}, nil
+		next, err := encodeAssignmentCursor(pairs[end-1].key)
+		if err != nil {
+			return nil, nil, err
+		}
+		return rv, &rs.SyncOpResults{NextPageToken: next}, nil
 	}
 	return rv, nil, nil
 }
@@ -153,8 +173,8 @@ func (b *roleAssignmentBuilder) List(ctx context.Context, _ *v2.ResourceId, opts
 // contributing to it has been seen, so it cannot be assembled page by page —
 // doing so would emit the same pair repeatedly with a partial contributor list,
 // and because resources upsert on (id, sync) the last partial write would win.
-// Paging is therefore an offset into this finished list, and caching keeps that
-// from re-copying and re-sorting every binding on each page.
+// Paging therefore searches this finished list, and caching keeps that from
+// re-copying and re-sorting every binding on each page.
 func (b *roleAssignmentBuilder) assignmentPairs(ctx context.Context, syncID string) ([]assignmentPair, error) {
 	b.pairsMutex.Lock()
 	defer b.pairsMutex.Unlock()
@@ -229,16 +249,7 @@ func (b *roleAssignmentBuilder) assignmentPairs(ctx context.Context, syncID stri
 		pairs = append(pairs, assignmentPair{key: key, contributors: contributors})
 	}
 	// Sorted so paging is stable across calls; map order is not.
-	sort.Slice(pairs, func(i, j int) bool {
-		a, c := pairs[i].key, pairs[j].key
-		if a.scopeType != c.scopeType {
-			return a.scopeType < c.scopeType
-		}
-		if a.scopeID != c.scopeID {
-			return a.scopeID < c.scopeID
-		}
-		return a.role < c.role
-	})
+	sort.Slice(pairs, func(i, j int) bool { return pairs[i].key.less(pairs[j].key) })
 
 	b.pairs = pairs
 	b.pairsSync = syncID
@@ -430,18 +441,45 @@ func (b *roleAssignmentBuilder) knownClusterRoles(ctx context.Context, syncID st
 	return names, nil
 }
 
-// parseOffsetToken reads the index this page starts at. The token is a plain
-// offset into the sorted pair list rather than a pagination bag, because the
-// list is rebuilt identically on every call from the sync-scoped caches.
-func parseOffsetToken(token string) (int, error) {
+// assignmentCursor is the page token: the last (cluster role, scope) pair
+// emitted, rather than an index into the list.
+//
+// An index does not survive the cross-process resume the rest of this connector
+// is built for. A resumed sync rebuilds the pair list from current cluster
+// state, so if any pair sorting before the index disappeared meanwhile,
+// everything after it shifts down and whichever pair lands on the old index is
+// never emitted — silently, because nothing errors. Resuming from the first
+// pair after a recorded key is self-correcting: bindings appearing or
+// disappearing before the cursor change which pairs remain, not which are
+// skipped.
+type assignmentCursor struct {
+	ScopeType string `json:"scopeType"`
+	ScopeID   string `json:"scopeID"`
+	Role      string `json:"role"`
+}
+
+// parseAssignmentCursor decodes the page token, returning nil for the first page.
+func parseAssignmentCursor(token string) (*assignmentKey, error) {
 	if token == "" {
-		return 0, nil
+		return nil, nil
 	}
-	offset, err := strconv.Atoi(token)
-	if err != nil || offset < 0 {
-		return 0, fmt.Errorf("invalid role assignment page token: %q", token)
+	var c assignmentCursor
+	if err := json.Unmarshal([]byte(token), &c); err != nil {
+		return nil, fmt.Errorf("invalid role assignment page token %q: %w", token, err)
 	}
-	return offset, nil
+	return &assignmentKey{scopeType: c.ScopeType, scopeID: c.ScopeID, role: c.Role}, nil
+}
+
+func encodeAssignmentCursor(key assignmentKey) (string, error) {
+	token, err := json.Marshal(assignmentCursor{
+		ScopeType: key.scopeType,
+		ScopeID:   key.scopeID,
+		Role:      key.role,
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to encode role assignment page token: %w", err)
+	}
+	return string(token), nil
 }
 
 func pageLimit(size int) int {

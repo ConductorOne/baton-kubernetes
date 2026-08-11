@@ -254,6 +254,78 @@ func TestRoleAssignmentPagesStably(t *testing.T) {
 	assert.Equal(t, 3, pages, "7 pairs at 3 per page")
 }
 
+// TestRoleAssignmentResumeSurvivesADeletedPair covers a sync resumed in a fresh
+// process while the cluster changed underneath it.
+//
+// The page token has to be the last pair emitted rather than an index into the
+// list. A resumed sync rebuilds that list from current cluster state, so with an
+// index, a pair sorting before it disappearing shifts everything down and
+// whichever pair lands on the old index is never emitted — silently, because
+// nothing errors. Deleting team-a's binding between the two pages here used to
+// lose ns:team-c:view entirely.
+func TestRoleAssignmentResumeSurvivesADeletedPair(t *testing.T) {
+	ctx := context.Background()
+	fixture := func(namespaces ...string) *roleAssignmentBuilder {
+		objects := []runtime.Object{clusterRole("view")}
+		for _, ns := range namespaces {
+			objects = append(objects, rbFor("rb", ns, RBACKindClusterRole, "view", userSubject("alice")))
+		}
+		return newRoleAssignmentFixture(objects...)
+	}
+
+	emitted := []string{}
+	collect := func(resources []*v2.Resource) {
+		for _, r := range resources {
+			emitted = append(emitted, r.GetId().GetResource())
+		}
+	}
+
+	// Page 1, two of four pairs.
+	first := fixture("team-a", "team-b", "team-c", "team-d")
+	page1, results, err := first.List(ctx, nil, rs.SyncOpAttrs{
+		SyncID: "sync-1", PageToken: paginationTokenWithSize("", 2),
+	})
+	require.NoError(t, err)
+	collect(page1)
+	require.NotNil(t, results)
+	require.NotEmpty(t, results.NextPageToken)
+
+	// The sync resumes in a fresh process — no cached pair list — and team-a's
+	// binding is gone, so every remaining pair has shifted down one position.
+	resumed := fixture("team-b", "team-c", "team-d")
+	for token := results.NextPageToken; ; {
+		page, results, err := resumed.List(ctx, nil, rs.SyncOpAttrs{
+			SyncID: "sync-1", PageToken: paginationTokenWithSize(token, 2),
+		})
+		require.NoError(t, err)
+		collect(page)
+		if results == nil || results.NextPageToken == "" {
+			break
+		}
+		require.NotEqual(t, token, results.NextPageToken, "page token must advance")
+		token = results.NextPageToken
+	}
+
+	assert.Contains(t, emitted, "ns:team-c:view",
+		"the pair after the deleted one must not be skipped by the resume")
+	assert.ElementsMatch(t,
+		[]string{"ns:team-a:view", "ns:team-b:view", "ns:team-c:view", "ns:team-d:view"},
+		emitted)
+}
+
+// TestRoleAssignmentRejectsAMalformedPageToken keeps a corrupt token from being
+// read as "start from the beginning", which would silently duplicate a page.
+func TestRoleAssignmentRejectsAMalformedPageToken(t *testing.T) {
+	b := newRoleAssignmentFixture(clusterRole("view"),
+		crbFor("view-everywhere", "view", userSubject("alice")))
+
+	_, _, err := b.List(context.Background(), nil, rs.SyncOpAttrs{
+		SyncID: "sync-1", PageToken: paginationToken("not-a-cursor"),
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid role assignment page token")
+}
+
 // TestClusterRoleSuppressedUnderRoleAssignments verifies the two models are
 // mutually exclusive: with the sparse model on, cluster_role must stop emitting
 // entitlements and grants or the same access is counted twice.
