@@ -40,23 +40,56 @@ func newSecretsScanResult() *secretsScanResult {
 	return &secretsScanResult{GroupMembers: make(map[string][]string)}
 }
 
-// loadSecretsScan reads this sync's scan. A missing key, a nil store, or a
-// session store the runtime did not enable all yield (nil, false).
+// withUsableStore runs fn against the session store, turning both errors and
+// panics into a plain false.
 //
-// Errors are logged and swallowed on purpose. The x509 pass is best-effort
-// discovery — downstream connectors embedding this package may run without
-// WithSessionStoreEnabled, and that must degrade group membership rather than
-// fail the mandatory user sync.
-func loadSecretsScan(ctx context.Context, store sessions.SessionStore) (*secretsScanResult, bool) {
+// The panic recovery is load-bearing, not paranoia. A syncer is always handed a
+// non-nil store: the SDK wraps whatever it has in connectorbuilder.WithSyncId,
+// which returns a *SessionStoreWithSyncID even when the store inside it is nil.
+// That is exactly what an embedder gets from connectorbuilder.NewConnector
+// without WithSessionStore — the shape baton-eks, baton-aks and baton-gke build
+// today — and calling through the wrapper then dereferences the nil inner store.
+// A nil check on the wrapper cannot see that, so without recovering here the
+// x509 pass would take down an otherwise healthy sync in every embedder.
+//
+// Errors are swallowed for the same reason: this pass is best-effort discovery,
+// and losing group membership is the correct degradation.
+func withUsableStore(ctx context.Context, store sessions.SessionStore, what string, fn func() error) bool {
 	if store == nil {
-		return nil, false
+		return false
 	}
-	result, found, err := session.GetJSON[*secretsScanResult](ctx, store, secretsScanKey, sessions.WithPrefix(secretsScanPrefix))
-	if err != nil {
-		ctxzap.Extract(ctx).Debug("x509 scan unavailable: session store read failed", zap.Error(err))
-		return nil, false
-	}
-	if !found || result == nil {
+
+	failed := false
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				ctxzap.Extract(ctx).Debug("x509 scan skipped: session store unusable",
+					zap.String("operation", what), zap.Any("recovered", r))
+				failed = true
+			}
+		}()
+		if err := fn(); err != nil {
+			ctxzap.Extract(ctx).Debug("x509 scan skipped: session store failed",
+				zap.String("operation", what), zap.Error(err))
+			failed = true
+		}
+	}()
+
+	return !failed
+}
+
+// loadSecretsScan reads this sync's scan. A missing key, an unusable store, or a
+// session store the runtime did not enable all yield (nil, false).
+func loadSecretsScan(ctx context.Context, store sessions.SessionStore) (*secretsScanResult, bool) {
+	var result *secretsScanResult
+	var found bool
+
+	ok := withUsableStore(ctx, store, "read", func() error {
+		var err error
+		result, found, err = session.GetJSON[*secretsScanResult](ctx, store, secretsScanKey, sessions.WithPrefix(secretsScanPrefix))
+		return err
+	})
+	if !ok || !found || result == nil {
 		return nil, false
 	}
 	if result.GroupMembers == nil {
@@ -66,14 +99,8 @@ func loadSecretsScan(ctx context.Context, store sessions.SessionStore) (*secrets
 }
 
 // storeSecretsScan persists this sync's scan, reporting whether it stuck.
-// Failures are logged and swallowed for the same reason as loadSecretsScan.
 func storeSecretsScan(ctx context.Context, store sessions.SessionStore, result *secretsScanResult) bool {
-	if store == nil {
-		return false
-	}
-	if err := session.SetJSON(ctx, store, secretsScanKey, result, sessions.WithPrefix(secretsScanPrefix)); err != nil {
-		ctxzap.Extract(ctx).Debug("x509 scan not persisted: session store write failed", zap.Error(err))
-		return false
-	}
-	return true
+	return withUsableStore(ctx, store, "write", func() error {
+		return session.SetJSON(ctx, store, secretsScanKey, result, sessions.WithPrefix(secretsScanPrefix))
+	})
 }

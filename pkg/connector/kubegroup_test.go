@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
+	"github.com/conductorone/baton-sdk/pkg/connectorbuilder"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
 	"github.com/conductorone/baton-sdk/pkg/types/sessions"
 	"github.com/stretchr/testify/assert"
@@ -113,15 +114,48 @@ func TestKubeGroupBuilderGrantsNoScan(t *testing.T) {
 }
 
 // TestKubeGroupBuilderGrantsNoSessionStore verifies the same degradation when no
-// session store is configured at all, which is how downstream connectors that
-// embed this package without WithSessionStoreEnabled will run.
+// session store is configured at all.
+//
+// The store is the one the SDK would actually hand a syncer, not a bare nil:
+// connectorbuilder.WithSyncId returns a non-nil wrapper even around a nil store,
+// which is what an embedder gets from connectorbuilder.NewConnector without
+// WithSessionStore — the shape baton-eks, baton-aks and baton-gke build today.
+// Calling through it dereferences the nil inner store, so a `Session: nil`
+// SyncOpAttrs would pass this test while every embedder panicked.
 func TestKubeGroupBuilderGrantsNoSessionStore(t *testing.T) {
 	builder := newKubeGroupBuilder(fake.NewSimpleClientset())
 
-	grants, _, err := builder.Grants(context.Background(), groupResource("some-group"), rs.SyncOpAttrs{})
+	for _, tc := range []struct {
+		name    string
+		session sessions.SessionStore
+	}{
+		{"nil session", nil},
+		{"sdk wrapper around a nil store", connectorbuilder.WithSyncId(nil, "sync-1")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			grants, _, err := builder.Grants(context.Background(), groupResource("some-group"),
+				rs.SyncOpAttrs{Session: tc.session})
 
-	require.NoError(t, err, "Grants() must not fail without a session store")
-	assert.Empty(t, grants)
+			require.NoError(t, err, "Grants() must not fail without a usable session store")
+			assert.Empty(t, grants)
+		})
+	}
+}
+
+// TestSecretsScanSurvivesUnusableStore covers the write side of the same shape:
+// kubeUserBuilder.List Phase 3 must not take down the mandatory user sync just
+// because the embedder wired no session store.
+func TestSecretsScanSurvivesUnusableStore(t *testing.T) {
+	ctx := context.Background()
+	unusable := connectorbuilder.WithSyncId(nil, "sync-1")
+
+	assert.NotPanics(t, func() {
+		assert.False(t, storeSecretsScan(ctx, unusable, newSecretsScanResult()))
+	})
+	assert.NotPanics(t, func() {
+		_, found := loadSecretsScan(ctx, unusable)
+		assert.False(t, found)
+	})
 }
 
 // TestKubeGroupBuilderGrantsIgnoresUnsealedScan verifies that a scan still being

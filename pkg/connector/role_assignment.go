@@ -334,7 +334,14 @@ func (b *roleAssignmentBuilder) Grants(ctx context.Context, resource *v2.Resourc
 	l := ctxzap.Extract(ctx)
 
 	scopeTrait, err := rs.GetScopeBindingTrait(resource)
-	if err != nil || scopeTrait == nil {
+	if err != nil {
+		// Kept separate from the missing-trait case below: %w on a nil error
+		// prints %!w(<nil>), so folding the two loses the decode failure that is
+		// the only clue why the trait could not be read.
+		return nil, nil, fmt.Errorf("role assignment %s: failed to read scope binding trait: %w",
+			resource.GetId().GetResource(), err)
+	}
+	if scopeTrait == nil {
 		return nil, nil, fmt.Errorf("role assignment %s has no scope binding trait", resource.GetId().GetResource())
 	}
 	roleName := scopeTrait.GetRoleId().GetResource()
