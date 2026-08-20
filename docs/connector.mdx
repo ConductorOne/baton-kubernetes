@@ -133,19 +133,17 @@ you can review does not change as the cluster's roles change — only who holds 
 </Note>
 
 Kubernetes' own control-plane roles are left out of the object layer. Every `system:` cluster role is
-bound across the whole cluster, so each one would otherwise appear on every object of every type
-— on the test cluster that was 78% of all object-level access, none of it anything a reviewer
-acts on. What those roles permit is still shown on the API resources. Turn on **Include
-control-plane permissions on objects** (`--include-system-object-permissions`) if you want them
-back on the objects too.
+bound across the whole cluster, so each one would otherwise appear on every object of every type —
+the large majority of what this layer would report, none of it anything a reviewer acts on. What
+those roles permit is still shown on the API resources. Turn on **Include control-plane permissions
+on objects** (`--include-system-object-permissions`) if you want them back on the objects too.
 
 <Warning>
-Object-level permissions scale with the number of objects, and pods are the type to watch: each
-pod declares 25 permissions and carried 11 grants on the test cluster (91 with control-plane
-permissions included). On a cluster with 5,000 pods that is around 125,000 rows for pods alone,
-so consider what opting pods in means at your scale. Pods are marked as a resource type whose
-count may legitimately fall between syncs, so a rollout replacing every pod is not reported as
-missing data.
+Object-level permissions scale with the number of objects. Because each type declares a fixed set,
+every object carries it whether or not anyone holds it — a pod declares 25 permissions, a secret or
+config map 5 — so consider what selecting Pods means on a cluster running thousands of them. Pods
+are marked as a resource type whose count may legitimately fall between syncs, so a rollout
+replacing every pod is not reported as missing data.
 </Warning>
 
 <Warning>
@@ -154,6 +152,11 @@ connector syncs, keep both: API resources is the only place a permission over a 
 objects can be reported, and permissions such as **list**, **watch** and **create** appear
 nowhere else, so dropping it makes "who can create pods in this namespace" unanswerable. Cluster
 goes with it because cluster-wide permissions are reported as children of that single resource.
+
+Keep **Roles**, **Cluster roles** and — if you use **Sync cluster role assignments** — **Role
+assignments** selected as well. Permissions are held by roles, so deselecting the role that holds
+one removes the access entirely: the permissions are still listed, but nobody appears to hold
+them.
 </Warning>
 
 This is independent of **Sync cluster role assignments**, which decides how membership is

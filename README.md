@@ -210,7 +210,8 @@ naming the dead `extensions/deployments` reaches nothing.
 
 **The control plane is excluded here by default.** Every `system:` cluster role is bound
 cluster-wide and most hold broad rules, so each one otherwise lands on every object of every
-synced type — 78% of this layer's grants on a stock cluster, none of it access anyone reviews.
+synced type, and on a stock cluster that is the large majority of this layer — none of it
+access anyone reviews.
 What those roles permit stays on the `api_resource` targets, where it costs one edge per API
 resource rather than one per object, and a rule naming a specific object is kept either way.
 `--include-system-object-permissions` (`BATON_INCLUDE_SYSTEM_OBJECT_PERMISSIONS`) puts them
@@ -236,43 +237,42 @@ object that has not been created yet, and that grant is still real.
 **Nothing is invented.** Before this flag existed, every pod, secret, configmap, deployment,
 statefulset, daemonset and node declared a fixed
 `get list watch create update patch delete` set, and every service account declared
-`impersonate` — 300+ entitlements on the test cluster that could never be granted, because
-nothing in the cluster conferred them. With the flag off these types declare nothing at all;
-with it on they declare exactly what rules confer.
+`impersonate` — hundreds of entitlements that could never be granted, because nothing in the
+cluster conferred them. Now a type declares exactly the permissions Kubernetes can authorize
+against one of its objects, and a grant appears only where a rule confers it.
 
 ### Scale
 
-`api_resource` grows with the cluster's API surface and the breadth of the roles bound in
-each namespace, not with object counts. On the 8-namespace, 71-ClusterRole test cluster:
-198 resources, 577 entitlements, 1,172 role-held grants and 1,310 expanded identity grants, of
-which 12 resources are `resourceNames`-narrowed targets.
+The two layers grow along different axes, so size them separately:
 
-Object-level permissions scale with object count instead, and because the entitlement set is
-fixed per type, every object of a synced type carries its full set whether or not anything
-grants it. A default sync — the class layer plus namespaces and service accounts, no workload
-types — is 370 resources, 1,690 entitlements and 3,024 grants on the fixture; selecting every
-type takes it to 463, 1,795 and 3,495.
+- **`api_resource` grows with the cluster's API surface and the breadth of the roles bound in
+  each namespace**, not with object counts. A namespace contributes its bound roles' rules once:
+  upstream `view` names 56 targets, `edit` 67 and `admin` 70, while `cluster-admin` names exactly
+  one (`*:*`). Wildcard-heavy roles are cheap; broad concrete ones are not. This layer is on by
+  default, so a cluster with many namespaces each binding `edit` or `admin` is where to look
+  first.
+- **Object-level permissions grow with object count.** The entitlement set is fixed per type, so
+  every object of a synced type carries its full set whether or not anything grants it — a pod
+  declares 25, a Secret or ConfigMap 5. Pods are the type to watch: they are usually the most
+  numerous objects in a cluster and they are recycled on every deploy.
 
-The class layer is the part that grows with the cluster rather than with objects, and it is on
-by default, so size it before pointing this at a large cluster: it is proportional to the API
-surface plus the breadth of the roles bound in each namespace. On the fixture that is 129
-cluster-wide targets and 59 in the one namespace with broad bindings. A cluster with 50
-namespaces each binding `view` and `edit` lands nearer 3,500 targets and ~20,000 entitlements.
-Narrowing `--sync-resource-types` is the lever if that is more than you want.
-Pods are the type to watch: 25 entitlements each, plus 11 grants by default (91 with the
-control plane included) — per pod, on a cluster that recycles them every deploy. At 5,000
-pods that is ~125,000 entitlement rows for pods alone, so weigh opting pods in on a large
-cluster.
-A namespace that binds a broad ClusterRole contributes its rules once: `view` names 56
-targets, `edit` 67, `admin` 70, while `cluster-admin` names one. Wildcard-heavy roles are
-cheap; broad concrete ones are not.
+`--sync-resource-types` is the lever for both: leaving the workload types out keeps the object
+layer empty, and the class layer alone still answers what the cluster's RBAC permits.
 
 `api_resource` and `cluster` carry `OptInRequired` but are both in the connector's default
 selection. If you narrow it with `--sync-resource-types`, keep them: without `api_resource`
 there is no way to express a permission over a class of objects, and the collection verbs
 (`list`, `watch`, `create`, `deletecollection`) exist nowhere else, so "who can create pods in
 team-a" becomes unanswerable. `cluster` goes with it, since cluster-wide targets are parented
-to that singleton:
+to that singleton.
+
+**Keep the role types too.** Every permission grant's principal is a `role`, a `cluster_role`
+or — under `--use-role-assignments` — a `role_assignment`, and its expansion source is an
+entitlement on that same resource. Drop the principal's type from the selection and the SDK
+filters those grants out entirely (`pkg/sync/ingest_filter.go` drops a grant whose principal
+type is not scheduled), so the permission targets sync with their entitlements and **no grants
+at all** — the same silently-empty surface this work removed. Selecting `api_resource` without
+`cluster_role` is the easiest way to get it:
 
 ```
 baton-kubernetes \

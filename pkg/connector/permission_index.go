@@ -619,13 +619,8 @@ func buildPermissionIndex(
 	if err != nil {
 		return nil, err
 	}
-	apiResources, err := discoverAPIResources(ctx, client)
-	if err != nil {
-		return nil, err
-	}
-
 	b := &permissionIndexBuilder{
-		apiResources:        apiResources,
+		apiResources:        discoverAPIResources(ctx, client),
 		includeControlPlane: includeControlPlane,
 		classes:             map[permissionClass]map[string]map[principalRef]struct{}{},
 		named:               map[namedObject]map[string]map[principalRef]struct{}{},
@@ -1103,25 +1098,35 @@ type apiResourceInfo struct {
 
 // discoverAPIResources describes every API resource the cluster serves,
 // subresources included — discovery lists pods/exec and deployments/scale as
-// resources of their own, which is what makes the declared entitlement set and
-// the wildcard-subresource check derivable rather than hand-maintained.
+// resources of their own, which is what makes the wildcard-subresource check and
+// the inert-rule check derivable rather than hand-maintained.
 //
 // It needs no extra access: the discovery endpoints are bound to
 // system:authenticated through the system:discovery cluster role on every
 // cluster.
 //
-// Partial failures are normal — an unavailable aggregated API server fails only
-// its own group — so whatever was discovered is used and the rest stays unknown,
-// which mints rather than drops.
-func discoverAPIResources(ctx context.Context, client kubernetes.Interface) (map[schema.GroupResource]apiResourceInfo, error) {
+// It cannot fail the sync, which is why it returns no error. Discovery breaks in
+// two ways and neither is fatal here: one aggregated API server being
+// unavailable fails only its own group, and a cluster that has unbound
+// system:discovery fails the whole document with a plain error rather than
+// client-go's ErrGroupDiscoveryFailed (discovery_client.go returns the bare error
+// when the group list itself is unreachable). Either way what was discovered is
+// used and the rest stays unknown.
+//
+// Unknown degrades safely rather than silently wrongly. isClusterScoped then
+// reports nothing as cluster-scoped, so a rule a namespaced binding can never
+// satisfy is reported instead of dropped — the documented trade. hasSubresource
+// reports every subresource as present, so a wildcard rule over "*/scale" spreads
+// to kinds without a scale endpoint, and those slugs are then dropped by the
+// declared set in object_permissions.go, which no cluster state can widen.
+func discoverAPIResources(ctx context.Context, client kubernetes.Interface) map[schema.GroupResource]apiResourceInfo {
 	l := ctxzap.Extract(ctx)
 
 	_, lists, err := client.Discovery().ServerGroupsAndResources()
 	if err != nil {
-		if !discovery.IsGroupDiscoveryFailedError(err) {
-			return nil, fmt.Errorf("failed to discover API resources: %w", err)
-		}
-		l.Debug("partial API discovery failure; undiscovered kinds are treated as unknown", zap.Error(err))
+		l.Debug("API discovery incomplete; undiscovered kinds are treated as unknown",
+			zap.Bool("partial", discovery.IsGroupDiscoveryFailedError(err)),
+			zap.Error(err))
 	}
 
 	resources := make(map[schema.GroupResource]apiResourceInfo)
@@ -1152,5 +1157,5 @@ func discoverAPIResources(ctx context.Context, client kubernetes.Interface) (map
 			resources[key] = apiResourceInfo{namespaced: apiResource.Namespaced, verbs: verbs}
 		}
 	}
-	return resources, nil
+	return resources
 }

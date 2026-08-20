@@ -2,11 +2,15 @@ package connector
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
@@ -512,4 +516,55 @@ func TestUndeclaredPermissionIsDropped(t *testing.T) {
 	// reaches any object.
 	_, ok := index.Class("core:pods/madeupsubresource@*")
 	assert.True(t, ok)
+}
+
+// TestTotalDiscoveryFailureStillSyncs pins the documented degradation. client-go
+// returns a bare error — not ErrGroupDiscoveryFailed — when the group list itself
+// is unreachable, which is what a cluster with system:discovery unbound does. The
+// sync must still produce permissions, because namespace and service_account are
+// default-synced and resolve their grants through this index.
+func TestTotalDiscoveryFailureStillSyncs(t *testing.T) {
+	editor := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{Name: "editor"},
+		Rules: rules(
+			rule([]string{""}, []string{pluralSecrets}, []string{verbGet, verbDelete}),
+			// A wildcard over a subresource: with discovery unavailable nothing
+			// knows which kinds have a scale endpoint.
+			rule([]string{verbAll}, []string{"*/scale"}, []string{verbUpdate}),
+		),
+	}
+	client := fake.NewSimpleClientset(editor,
+		crbFor("editor-everywhere", "editor", userSubject("alice@example.com")))
+	client.Resources = apiResourceLists()
+	// Fail the group list, the way a 403 on /api and /apis does.
+	client.Fake.PrependReactor("get", "group", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("forbidden: User cannot list resource \"group\"")
+	})
+
+	// The precondition the bug depended on: this is a bare error, so any code
+	// that only tolerates ErrGroupDiscoveryFailed would propagate it.
+	_, _, discoveryErr := client.Discovery().ServerGroupsAndResources()
+	require.Error(t, discoveryErr)
+	require.False(t, discovery.IsGroupDiscoveryFailedError(discoveryErr),
+		"a total failure is not a partial one; that distinction is the bug")
+
+	k := &Kubernetes{client: client, opts: ConnectorOpts{}}
+	index, err := buildPermissionIndex(context.Background(), client, k, "sync-1", false, false)
+	require.NoError(t, err, "a discovery failure must not fail the sync")
+
+	// Permissions are still derived.
+	class, ok := index.Class("core:secrets@*")
+	require.True(t, ok)
+	assert.Equal(t, []string{verbDelete, verbGet}, index.Verbs(class))
+
+	secret, err := rs.NewResource("kc-alice", ResourceTypeSecret, "team-a/kc-alice")
+	require.NoError(t, err)
+	resolver := &permissionResolver{provider: stubProvider{index: index}}
+	granted, err := resolver.objectPermissions(context.Background(), "sync-1", ResourceTypeSecret, secret)
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{verbGet, verbDelete}, sortedSlugs(granted))
+
+	// And the wildcard subresource cannot leak onto a kind with no scale
+	// endpoint, because the declared set is fixed rather than discovered.
+	assert.NotContains(t, granted, "update:scale")
 }
