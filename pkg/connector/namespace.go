@@ -17,6 +17,9 @@ import (
 // namespaceBuilder syncs Kubernetes Namespaces as Baton resources.
 type namespaceBuilder struct {
 	client kubernetes.Interface
+	// perms resolves which roles confer this builder's objects' permissions.
+	// Only grants need it: what a type declares is fixed (object_permissions.go).
+	perms *permissionResolver
 }
 
 // ResourceType returns the resource type for Namespace.
@@ -35,16 +38,6 @@ func (n *namespaceBuilder) List(ctx context.Context, parentResourceID *v2.Resour
 	bag, err := ParsePageToken(opts.PageToken.Token)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to parse page token: %w", err)
-	}
-
-	// Add wildcard resource first, but only on the first page (when page token is empty)
-	if bag.PageToken() == "" {
-		wildcardResource, err := generateWildcardResource(ResourceTypeNamespace)
-		if err != nil {
-			l.Error("failed to create wildcard resource for namespaces", zap.Error(err))
-		} else {
-			rv = append(rv, wildcardResource)
-		}
 	}
 
 	// Set up list options with pagination
@@ -114,19 +107,35 @@ func namespaceResource(ns *corev1.Namespace) (*v2.Resource, error) {
 	return resource, nil
 }
 
-// Entitlements returns no entitlements for Namespace resources.
-func (n *namespaceBuilder) Entitlements(_ context.Context, resource *v2.Resource, _ rs.SyncOpAttrs) ([]*v2.Entitlement, *rs.SyncOpResults, error) {
+// StaticEntitlements declares what an object of this type can carry, once for
+// the whole type rather than per object. The set is fixed and needs nothing from
+// the cluster — see object_permissions.go for why it is a capability list rather
+// than a reading of the rules.
+func (n *namespaceBuilder) StaticEntitlements(_ context.Context, _ rs.SyncOpAttrs) ([]*v2.Entitlement, *rs.SyncOpResults, error) {
+	return staticObjectEntitlements(ResourceTypeNamespace), nil, nil
+}
+
+// Entitlements returns none: the type carries SkipEntitlements and declares its
+// entitlements through StaticEntitlements instead.
+func (n *namespaceBuilder) Entitlements(_ context.Context, _ *v2.Resource, _ rs.SyncOpAttrs) ([]*v2.Entitlement, *rs.SyncOpResults, error) {
 	return nil, nil, nil
 }
 
-// Grants returns no grants for Namespace resources.
-func (n *namespaceBuilder) Grants(_ context.Context, resource *v2.Resource, _ rs.SyncOpAttrs) ([]*v2.Grant, *rs.SyncOpResults, error) {
-	return nil, nil, nil
+// Grants returns the roles conferring those named-object permissions, expandable
+// through each one's membership entitlement so the subjects holding the role
+// inherit the permission.
+func (n *namespaceBuilder) Grants(ctx context.Context, resource *v2.Resource, opts rs.SyncOpAttrs) ([]*v2.Grant, *rs.SyncOpResults, error) {
+	grants, err := objectGrants(ctx, n.perms, opts, ResourceTypeNamespace, resource)
+	if err != nil {
+		return nil, nil, err
+	}
+	return grants, nil, nil
 }
 
 // newNamespaceBuilder creates a new namespace builder.
-func newNamespaceBuilder(client kubernetes.Interface) *namespaceBuilder {
+func newNamespaceBuilder(client kubernetes.Interface, perms *permissionResolver) *namespaceBuilder {
 	return &namespaceBuilder{
 		client: client,
+		perms:  perms,
 	}
 }

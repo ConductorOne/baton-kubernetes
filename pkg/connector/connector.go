@@ -45,6 +45,9 @@ type ConnectorOpts struct {
 	CustomSyncer  map[string]ResourceSyncerBuilder
 	// UseRoleAssignments switches cluster role access to the sparse model.
 	UseRoleAssignments bool
+	// IncludeSystemObjectPermissions keeps the control plane's own permissions
+	// in the object layer.
+	IncludeSystemObjectPermissions bool
 	// ClusterName labels the cluster resource. Empty falls back to the API
 	// server host.
 	ClusterName string
@@ -87,6 +90,22 @@ func WithRoleAssignments(enabled bool) ConnectorOption {
 	}
 }
 
+// WithSystemObjectPermissions keeps the permissions Kubernetes' own control-plane
+// roles hold on individual objects.
+//
+// They are dropped by default. Every system: cluster role is bound cluster-wide
+// and most of them hold broad rules, so each one lands on every object of every
+// synced type — 78% of the object layer on a stock cluster, none of it access
+// anyone reviews. What those roles permit stays visible on the api_resource
+// targets, where it costs one edge per API resource rather than one per object,
+// and a rule naming a specific object is kept either way.
+func WithSystemObjectPermissions(enabled bool) ConnectorOption {
+	return func(opts *ConnectorOpts) error {
+		opts.IncludeSystemObjectPermissions = enabled
+		return nil
+	}
+}
+
 // WithClusterName sets the display name of the singleton cluster resource.
 //
 // Without it the name falls back to the API server host, which is a poor label
@@ -117,6 +136,11 @@ type Kubernetes struct {
 	bindingsMutex            sync.RWMutex
 	bindingsLoaded           bool
 	bindingsSyncID           string
+
+	// Permission index, valid only for the sync identified by permissionsSyncID.
+	permissionsMutex  sync.Mutex
+	permissionsCache  *PermissionIndex
+	permissionsSyncID string
 }
 
 // NewFromConfig creates a Kubernetes connector from the typed configuration struct.
@@ -267,6 +291,7 @@ func NewFromConfig(
 	k, err := New(ctx, restConfig,
 		WithSyncResources(syncResources),
 		WithRoleAssignments(cfg.UseRoleAssignments),
+		WithSystemObjectPermissions(cfg.IncludeSystemObjectPermissions),
 		WithClusterName(clusterNameFromConfig(opt, cfg)),
 	)
 	if err != nil {
@@ -383,10 +408,10 @@ func (k *Kubernetes) ResourceSyncers(ctx context.Context) []connectorbuilder.Res
 	// Map resource type IDs to their builder functions
 	builders := map[string]ResourceSyncerBuilder{
 		ResourceTypeNamespace.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncerV2 {
-			return newNamespaceBuilder(k.client)
+			return newNamespaceBuilder(k.client, k.permissions())
 		},
 		ResourceTypeServiceAccount.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncerV2 {
-			return newServiceAccountBuilder(k.client)
+			return newServiceAccountBuilder(k.client, k.permissions())
 		},
 		ResourceTypeRole.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncerV2 {
 			return newRoleBuilder(k.client, k)
@@ -395,31 +420,34 @@ func (k *Kubernetes) ResourceSyncers(ctx context.Context) []connectorbuilder.Res
 			return newClusterRoleBuilder(k.client, k, k.opts.UseRoleAssignments)
 		},
 		ResourceTypeCluster.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncerV2 {
-			return newClusterBuilder(k.opts.ClusterName, k.config.Host, k.opts.UseRoleAssignments)
+			return newClusterBuilder(k.opts.ClusterName, k.config.Host)
 		},
 		ResourceTypeRoleAssignment.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncerV2 {
 			return newRoleAssignmentBuilder(k.client, k, k.opts.UseRoleAssignments)
 		},
+		ResourceTypeAPIResource.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncerV2 {
+			return newAPIResourceBuilder(k)
+		},
 		ResourceTypeSecret.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncerV2 {
-			return newSecretBuilder(k.client)
+			return newSecretBuilder(k.client, k.permissions())
 		},
 		ResourceTypeConfigMap.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncerV2 {
-			return newConfigMapBuilder(k.client)
+			return newConfigMapBuilder(k.client, k.permissions())
 		},
 		ResourceTypeNode.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncerV2 {
-			return newNodeBuilder(k.client)
+			return newNodeBuilder(k.client, k.permissions())
 		},
 		ResourceTypeDeployment.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncerV2 {
-			return newDeploymentBuilder(k.client)
+			return newDeploymentBuilder(k.client, k.permissions())
 		},
 		ResourceTypeStatefulSet.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncerV2 {
-			return newStatefulSetBuilder(k.client)
+			return newStatefulSetBuilder(k.client, k.permissions())
 		},
 		ResourceTypeDaemonSet.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncerV2 {
-			return newDaemonSetBuilder(k.client)
+			return newDaemonSetBuilder(k.client, k.permissions())
 		},
 		ResourceTypePod.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncerV2 {
-			return newPodBuilder(k.client)
+			return newPodBuilder(k.client, k.permissions())
 		},
 		ResourceTypeKubeUser.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncerV2 {
 			return newKubeUserBuilder(k.client)
@@ -458,6 +486,43 @@ func (k *Kubernetes) ResourceSyncers(ctx context.Context) []connectorbuilder.Res
 	return syncers
 }
 
+// permissions returns the resolver object builders use to find which roles confer
+// their objects' permissions.
+//
+// Not gated on anything: selecting a resource type is what asks for its access
+// data. A type that syncs its objects but not the access to them would be
+// inventory, which is not what anyone selects a resource type for.
+func (k *Kubernetes) permissions() *permissionResolver {
+	return &permissionResolver{provider: k}
+}
+
+// PermissionIndex returns this sync's permission index, building it once and
+// caching it for the sync that asked.
+//
+// Built whole rather than incrementally: a class is only complete once every
+// binding has been walked, so assembling it page by page would emit the same
+// class repeatedly with a partial verb list, and because resources upsert on
+// (id, sync) the last partial write would win. The cache is keyed on the sync ID
+// for the same reason the binding caches are — a long-lived connector in service
+// mode must never serve one sync's derived state to the next.
+func (k *Kubernetes) PermissionIndex(ctx context.Context, syncID string) (*PermissionIndex, error) {
+	k.permissionsMutex.Lock()
+	defer k.permissionsMutex.Unlock()
+
+	if k.permissionsCache != nil && k.permissionsSyncID == syncID {
+		return k.permissionsCache, nil
+	}
+
+	index, err := buildPermissionIndex(ctx, k.client, k, syncID, k.opts.UseRoleAssignments, k.opts.IncludeSystemObjectPermissions)
+	if err != nil {
+		return nil, err
+	}
+
+	k.permissionsCache = index
+	k.permissionsSyncID = syncID
+	return index, nil
+}
+
 // Metadata returns the connector metadata.
 func (k *Kubernetes) Metadata(ctx context.Context) (*v2.ConnectorMetadata, error) {
 	return &v2.ConnectorMetadata{
@@ -493,21 +558,22 @@ func (d *defaultCapabilitiesBuilder) Validate(_ context.Context) (annotations.An
 
 func (d *defaultCapabilitiesBuilder) ResourceSyncers(_ context.Context) []connectorbuilder.ResourceSyncerV2 {
 	return []connectorbuilder.ResourceSyncerV2{
-		newNamespaceBuilder(nil),
-		newServiceAccountBuilder(nil),
+		newNamespaceBuilder(nil, nil),
+		newServiceAccountBuilder(nil, nil),
 		newRoleBuilder(nil, nil),
 		newClusterRoleBuilder(nil, nil, false),
-		newClusterBuilder("", "", true),
+		newClusterBuilder("", ""),
 		newRoleAssignmentBuilder(nil, nil, true),
+		newAPIResourceBuilder(nil),
 		newKubeUserBuilder(nil),
 		newKubeGroupBuilder(nil),
-		newConfigMapBuilder(nil),
-		newSecretBuilder(nil),
-		newPodBuilder(nil),
-		newNodeBuilder(nil),
-		newDeploymentBuilder(nil),
-		newStatefulSetBuilder(nil),
-		newDaemonSetBuilder(nil),
+		newConfigMapBuilder(nil, nil),
+		newSecretBuilder(nil, nil),
+		newPodBuilder(nil, nil),
+		newNodeBuilder(nil, nil),
+		newDeploymentBuilder(nil, nil),
+		newStatefulSetBuilder(nil, nil),
+		newDaemonSetBuilder(nil, nil),
 	}
 }
 

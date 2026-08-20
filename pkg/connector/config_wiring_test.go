@@ -94,11 +94,14 @@ func TestRegisteredResourceTypesCoverEverySelectableType(t *testing.T) {
 		"the registered set must not depend on the sparse flag")
 }
 
-// TestSparseBuildersEmitNothingWhenDisabled is the other half of registering the
-// sparse types unconditionally: they must stay silent while the flag is off, or
-// the flat model would gain resources it never had and cluster role access would
-// be counted twice.
-func TestSparseBuildersEmitNothingWhenDisabled(t *testing.T) {
+// TestRoleAssignmentsEmitNothingWhenDisabled is the other half of registering the
+// sparse type unconditionally: it must stay silent while the flag is off, or
+// cluster role access would be counted twice.
+//
+// The cluster singleton has no such gate. It is one resource, both the sparse
+// assignments and the cluster-wide api_resource targets anchor to it, and
+// selecting the type is what asks for it.
+func TestRoleAssignmentsEmitNothingWhenDisabled(t *testing.T) {
 	ctx := context.Background()
 	client := fake.NewSimpleClientset(
 		clusterRole("view"),
@@ -110,10 +113,10 @@ func TestSparseBuildersEmitNothingWhenDisabled(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, assignments, "role assignments must not be emitted alongside the flat model")
 
-	clusters, _, err := newClusterBuilder("kind-test", "https://10.96.0.1:443", false).
+	clusters, _, err := newClusterBuilder("kind-test", "https://10.96.0.1:443").
 		List(ctx, nil, rs.SyncOpAttrs{SyncID: "sync-1"})
 	require.NoError(t, err)
-	assert.Empty(t, clusters, "the cluster anchor has nothing to anchor without role assignments")
+	require.Len(t, clusters, 1)
 }
 
 // TestDefaultSyncFilterCoversTheSparseTypes pins the regression the default
@@ -131,6 +134,11 @@ func TestDefaultSyncFilterCoversTheSparseTypes(t *testing.T) {
 		"the sparse model produces nothing if its own type is filtered out by default")
 	assert.True(t, defaults[ResourceTypeCluster.Id],
 		"cluster-scoped assignments need their scope resource synced or C1 drops the relationship")
+
+	// api_resource is the only type that can express a permission over a class of
+	// objects, and the collection verbs live nowhere else, so filtering it out of
+	// the default would leave "who can create pods in team-a" unanswerable.
+	assert.True(t, defaults[ResourceTypeAPIResource.Id])
 }
 
 // TestClusterNameIgnoresKubeconfigWhenServerIsExplicit covers the documented

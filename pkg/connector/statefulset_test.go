@@ -106,21 +106,18 @@ func TestStatefulSetBuilderList(t *testing.T) {
 
 	// Assertions
 	require.NoError(t, err)
-	// Expecting 3 resources: the wildcard resource plus the 2 test StatefulSets
-	require.Len(t, resources, 3)
+	// Only the real StatefulSets: the synthetic "*" resource is gone, since a
+	// class of objects is not something a Kubernetes rule ever addresses.
+	require.Len(t, resources, 2)
 	assert.Empty(t, nextPageToken)
 
-	// Find and verify the wildcard resource
-	var wildcardResourceFound bool
 	// Verify the real StatefulSet resources
 	var foundSts1, foundSts2 bool
 
 	for _, res := range resources {
 		switch {
 		case res.Id.Resource == "*":
-			wildcardResourceFound = true
-			assert.Equal(t, ResourceTypeStatefulSet.Id, res.Id.ResourceType)
-			assert.Contains(t, res.DisplayName, "All")
+			t.Errorf("unexpected wildcard resource in results")
 		case res.DisplayName == "test-statefulset-1":
 			foundSts1 = true
 			assert.Equal(t, "test-namespace/test-statefulset-1", res.Id.Resource)
@@ -130,7 +127,6 @@ func TestStatefulSetBuilderList(t *testing.T) {
 		}
 	}
 
-	assert.True(t, wildcardResourceFound, "Wildcard StatefulSet resource should be in the results")
 	assert.True(t, foundSts1, "test-statefulset-1 should be in the results")
 	assert.True(t, foundSts2, "test-statefulset-2 should be in the results")
 }
@@ -157,26 +153,12 @@ func TestStatefulSetBuilderEntitlements(t *testing.T) {
 	ctx := context.Background()
 	entitlements, nextPageToken, err := builder.Entitlements(ctx, testResource, rs.SyncOpAttrs{})
 
-	// Assertions
+	// Assertions: with no permission resolver — granular permissions off — a
+	// StatefulSet carries no entitlements at all. The old fixed verb set could
+	// never be granted, because no RBAC rule names an individual StatefulSet.
 	require.NoError(t, err)
 	assert.Empty(t, nextPageToken)
-
-	// Verify standard verb entitlements
-	standardVerbCount := len(standardResourceVerbs)
-	// Plus 1 for the "scale" verb specific to StatefulSets
-	expectedEntitlementCount := standardVerbCount + 1
-	require.Len(t, entitlements, expectedEntitlementCount)
-
-	// Check for scale entitlement specifically
-	foundScale := false
-	for _, ent := range entitlements {
-		if ent.DisplayName == "scale test-statefulset" {
-			foundScale = true
-			assert.Contains(t, ent.Description, "scale")
-			assert.Len(t, ent.GrantableTo, 2) // Role and ClusterRole
-		}
-	}
-	assert.True(t, foundScale, "scale entitlement should be present")
+	assert.Empty(t, entitlements)
 }
 
 func TestStatefulSetBuilderGrants(t *testing.T) {

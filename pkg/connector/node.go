@@ -9,7 +9,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
-	"github.com/conductorone/baton-sdk/pkg/types/entitlement"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"go.uber.org/zap"
@@ -18,6 +17,9 @@ import (
 // nodeBuilder syncs Kubernetes Nodes as Baton resources.
 type nodeBuilder struct {
 	client kubernetes.Interface
+	// perms resolves which roles confer this builder's objects' permissions.
+	// Only grants need it: what a type declares is fixed (object_permissions.go).
+	perms *permissionResolver
 }
 
 // ResourceType returns the resource type for Node.
@@ -36,16 +38,6 @@ func (n *nodeBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId,
 	bag, err := ParsePageToken(opts.PageToken.Token)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to parse page token: %w", err)
-	}
-
-	// Add wildcard resource first, but only on the first page (when page token is empty)
-	if bag.PageToken() == "" {
-		wildcardResource, err := generateWildcardResource(ResourceTypeNode)
-		if err != nil {
-			l.Error("failed to create wildcard resource for nodes", zap.Error(err))
-		} else {
-			rv = append(rv, wildcardResource)
-		}
 	}
 
 	// Set up list options with pagination
@@ -108,36 +100,35 @@ func nodeResource(node *corev1.Node) (*v2.Resource, error) {
 	return resource, nil
 }
 
-// Entitlements returns standard verb entitlements for Node resources.
-func (n *nodeBuilder) Entitlements(ctx context.Context, resource *v2.Resource, _ rs.SyncOpAttrs) ([]*v2.Entitlement, *rs.SyncOpResults, error) {
-	var entitlements []*v2.Entitlement
-
-	// Add standard verb entitlements
-	for _, verb := range standardResourceVerbs {
-		ent := entitlement.NewPermissionEntitlement(
-			resource,
-			verb,
-			entitlement.WithDisplayName(fmt.Sprintf("%s %s", verb, resource.DisplayName)),
-			entitlement.WithDescription(fmt.Sprintf("Grants %s permission on the %s node", verb, resource.DisplayName)),
-			entitlement.WithGrantableTo(
-				ResourceTypeRole,
-				ResourceTypeClusterRole,
-			),
-		)
-		entitlements = append(entitlements, ent)
-	}
-
-	return entitlements, nil, nil
+// StaticEntitlements declares what an object of this type can carry, once for
+// the whole type rather than per object. The set is fixed and needs nothing from
+// the cluster — see object_permissions.go for why it is a capability list rather
+// than a reading of the rules.
+func (n *nodeBuilder) StaticEntitlements(_ context.Context, _ rs.SyncOpAttrs) ([]*v2.Entitlement, *rs.SyncOpResults, error) {
+	return staticObjectEntitlements(ResourceTypeNode), nil, nil
 }
 
-// Grants returns no grants for Node resources.
-func (n *nodeBuilder) Grants(ctx context.Context, resource *v2.Resource, _ rs.SyncOpAttrs) ([]*v2.Grant, *rs.SyncOpResults, error) {
+// Entitlements returns none: the type carries SkipEntitlements and declares its
+// entitlements through StaticEntitlements instead.
+func (n *nodeBuilder) Entitlements(_ context.Context, _ *v2.Resource, _ rs.SyncOpAttrs) ([]*v2.Entitlement, *rs.SyncOpResults, error) {
 	return nil, nil, nil
 }
 
+// Grants returns the roles conferring those named-object permissions, expandable
+// through each one's membership entitlement so the subjects holding the role
+// inherit the permission.
+func (n *nodeBuilder) Grants(ctx context.Context, resource *v2.Resource, opts rs.SyncOpAttrs) ([]*v2.Grant, *rs.SyncOpResults, error) {
+	grants, err := objectGrants(ctx, n.perms, opts, ResourceTypeNode, resource)
+	if err != nil {
+		return nil, nil, err
+	}
+	return grants, nil, nil
+}
+
 // newNodeBuilder creates a new node builder.
-func newNodeBuilder(client kubernetes.Interface) *nodeBuilder {
+func newNodeBuilder(client kubernetes.Interface, perms *permissionResolver) *nodeBuilder {
 	return &nodeBuilder{
 		client: client,
+		perms:  perms,
 	}
 }

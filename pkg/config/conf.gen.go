@@ -21,6 +21,7 @@ type Kubernetes struct {
 	RequestTimeout string `mapstructure:"request-timeout"`
 	DisableCompression bool `mapstructure:"disable-compression"`
 	UseRoleAssignments bool `mapstructure:"use-role-assignments"`
+	IncludeSystemObjectPermissions bool `mapstructure:"include-system-object-permissions"`
 }
 
 func (c *Kubernetes) findFieldByTag(tagValue string) (any, bool) {
