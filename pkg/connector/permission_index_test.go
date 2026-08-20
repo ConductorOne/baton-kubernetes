@@ -537,7 +537,7 @@ func TestTotalDiscoveryFailureStillSyncs(t *testing.T) {
 		crbFor("editor-everywhere", "editor", userSubject("alice@example.com")))
 	client.Resources = apiResourceLists()
 	// Fail the group list, the way a 403 on /api and /apis does.
-	client.Fake.PrependReactor("get", "group", func(k8stesting.Action) (bool, runtime.Object, error) {
+	client.PrependReactor("get", "group", func(k8stesting.Action) (bool, runtime.Object, error) {
 		return true, nil, fmt.Errorf("forbidden: User cannot list resource \"group\"")
 	})
 
