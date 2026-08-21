@@ -28,8 +28,7 @@ type clusterRoleBuilder struct {
 	// because the role_assignment type is expressing the same access. The two
 	// models are mutually exclusive; emitting both would double-count it.
 	useRoleAssignments bool
-	// matchCfg names the directory-side fields that external-match carrier
-	// grants claim to match on. See external_match.go.
+	// matchCfg tunes external-match carriers. See external_match.go.
 	matchCfg ExternalMatchConfig
 	// Cached namespaces
 	cachedNamespaces []string

@@ -86,8 +86,7 @@ type roleAssignmentBuilder struct {
 	// entitlements and grants, so emitting assignments too would count the same
 	// access twice.
 	enabled bool
-	// matchCfg names the directory-side fields that external-match carrier
-	// grants claim to match on. See external_match.go.
+	// matchCfg tunes external-match carriers. See external_match.go.
 	matchCfg ExternalMatchConfig
 
 	// clusterRoles caches the names of existing cluster roles for one sync, so

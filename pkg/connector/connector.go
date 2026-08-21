@@ -51,10 +51,8 @@ type ConnectorOpts struct {
 	// ClusterName labels the cluster resource. Empty falls back to the API
 	// server host.
 	ClusterName string
-	// ExternalMatch tunes the external-match carrier grants that accompany every
-	// User and Group subject. Its zero value is usable and selects the defaults;
-	// carriers are always emitted, so nothing here turns the feature on or off.
-	// See external_match.go.
+	// ExternalMatch tunes the carrier grants emitted for User and Group subjects.
+	// Zero value is usable. See external_match.go.
 	ExternalMatch ExternalMatchConfig
 }
 
@@ -129,16 +127,9 @@ func WithClusterName(name string) ConnectorOption {
 	}
 }
 
-// WithExternalMatch names the directory-side fields that external-match carrier
-// grants claim to match on.
-//
-// Kubernetes never stores the identities it authorizes, so a User or Group
-// subject is matched against a separate identity source in C1. Which field it
-// matches on is a property of that directory: an OIDC-federated cluster's
-// usernames are email addresses, an Entra-federated cluster's are UPNs. Unset
-// fields fall back to the defaults in external_match.go, which suit the OIDC
-// case; downstream connectors (baton-eks, baton-aks, baton-gke) that know their
-// provider's directory should pass its keys.
+// WithExternalMatch sets the profile keys external-match carriers claim to match
+// on. Unset fields take the defaults in external_match.go; downstream connectors
+// that know their identity source should pass its keys.
 func WithExternalMatch(cfg ExternalMatchConfig) ConnectorOption {
 	return func(opts *ConnectorOpts) error {
 		opts.ExternalMatch = cfg

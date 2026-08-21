@@ -214,7 +214,7 @@
     {
       "name": "external-user-match-key",
       "displayName": "External user match key",
-      "description": "Profile field on the external identity source to match a Kubernetes User subject against. Defaults to \"email\", which also matches a user's email addresses. Use \"userPrincipalName\" for clusters federated against Microsoft Entra.",
+      "description": "Profile field on the identity source to match a Kubernetes User subject against. Defaults to \"email\".",
       "stringField": {
         "rules": {}
       }
@@ -222,7 +222,7 @@
     {
       "name": "external-group-match-key",
       "displayName": "External group match key",
-      "description": "Profile field on the external identity source to match a Kubernetes Group subject against. Defaults to \"display_name\", which is where Microsoft Entra publishes a group's name. Group subjects are additionally always matched against the external group's ID, which is what AKS clusters use as the group name (an Entra object GUID).",
+      "description": "Profile field on the identity source to match a Kubernetes Group subject against. Defaults to \"display_name\". Group subjects are also always matched against the identity source's resource ID.",
       "stringField": {
         "rules": {}
       }

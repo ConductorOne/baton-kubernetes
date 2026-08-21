@@ -18,9 +18,7 @@ var testRoleResource = &v2.Resource{
 	DisplayName: "pod-reader",
 }
 
-// isCarrier reports whether a grant is an external-match carrier. Carrying a
-// match annotation is what makes it one — that is the property the SDK keys on
-// too, so testing for it beats inferring from the principal's resource type.
+// isCarrier reports whether a grant is an external-match carrier.
 func isCarrier(g *v2.Grant) bool {
 	annos := annotations.Annotations(g.GetAnnotations())
 	return annos.ContainsAny(
@@ -30,11 +28,8 @@ func isCarrier(g *v2.Grant) bool {
 	)
 }
 
-// durableGrants returns only the grants that stand on their own: the ones whose
-// principal is a resource this connector actually syncs. Every User and Group
-// subject also yields a carrier (see external_match.go), so a test about binding
-// scope, subject dedup, or cache lifetime would otherwise be counting carriers
-// along with the access it means to measure.
+// durableGrants returns the non-carrier grants, so tests about binding scope,
+// dedup or cache lifetime measure access rather than carriers.
 func durableGrants(grants []*v2.Grant) []*v2.Grant {
 	out := make([]*v2.Grant, 0, len(grants))
 	for _, g := range grants {
@@ -45,8 +40,7 @@ func durableGrants(grants []*v2.Grant) []*v2.Grant {
 	return out
 }
 
-// carrierGrants is durableGrants' complement, for the tests that are about
-// carriers.
+// carrierGrants is durableGrants' complement.
 func carrierGrants(grants []*v2.Grant) []*v2.Grant {
 	out := make([]*v2.Grant, 0, len(grants))
 	for _, g := range grants {
@@ -57,8 +51,7 @@ func carrierGrants(grants []*v2.Grant) []*v2.Grant {
 	return out
 }
 
-// pickMatchID returns the ExternalResourceMatchID on a grant, failing the test
-// if it carries none.
+// pickMatchID returns the grant's ExternalResourceMatchID, or fails.
 func pickMatchID(t *testing.T, g *v2.Grant) *v2.ExternalResourceMatchID {
 	t.Helper()
 	annos := annotations.Annotations(g.GetAnnotations())
@@ -69,8 +62,7 @@ func pickMatchID(t *testing.T, g *v2.Grant) *v2.ExternalResourceMatchID {
 	return got
 }
 
-// pickMatch returns the key/value ExternalResourceMatch on a grant, failing the
-// test if it carries none.
+// pickMatch returns the grant's key/value ExternalResourceMatch, or fails.
 func pickMatch(t *testing.T, g *v2.Grant) *v2.ExternalResourceMatch {
 	t.Helper()
 	annos := annotations.Annotations(g.GetAnnotations())
@@ -94,11 +86,9 @@ func pickExpandable(t *testing.T, g *v2.Grant) *v2.GrantExpandable {
 	return got
 }
 
-// TestUserSubjectEmitsDurableAndCarrier verifies a User subject produces both
-// grants: the durable one that survives with no identity source configured, and
-// the carrier that reaches the directory. The durable grant must carry no match
-// annotation, or the SDK would delete it along with the carrier and the user's
-// access would disappear from the review entirely.
+// TestUserSubjectEmitsDurableAndCarrier verifies a User subject yields both
+// grants, and that the durable one carries no annotation — otherwise the SDK
+// would delete it along with the carrier.
 func TestUserSubjectEmitsDurableAndCarrier(t *testing.T) {
 	subject := rbacv1.Subject{Kind: SubjectKindUser, Name: "alice@example.com", APIGroup: RBACAPIGroup}
 
@@ -129,9 +119,8 @@ func TestUserSubjectEmitsDurableAndCarrier(t *testing.T) {
 		"a user resolves to one account; there is nothing to expand through")
 }
 
-// TestGroupSubjectEmitsDurableAndCarrier verifies the same for a Group subject,
-// plus the expansion annotation that turns a matched directory group into the
-// accounts inside it.
+// TestGroupSubjectEmitsDurableAndCarrier verifies the same for a Group, plus the
+// expansion annotation.
 func TestGroupSubjectEmitsDurableAndCarrier(t *testing.T) {
 	subject := rbacv1.Subject{Kind: SubjectKindGroup, Name: "SCRUM-HPC-ADMIN", APIGroup: RBACAPIGroup}
 
@@ -165,11 +154,9 @@ func TestGroupSubjectEmitsDurableAndCarrier(t *testing.T) {
 	require.NotEmpty(t, expandable.GetEntitlementIds())
 }
 
-// TestGroupCarrierExpandableTargetsItsOwnPrincipal pins the invariant the SDK's
-// remap depends on: it looks the expansion up by the bid of the grant's
-// principal, then re-mints the same slug against whichever external principal
-// matched. An expandable entitlement naming any other resource is silently
-// ignored, and the group would match but never expand to its members.
+// TestGroupCarrierExpandableTargetsItsOwnPrincipal pins what the SDK's remap
+// needs: it finds the expansion by the grant principal's bid. An expandable
+// naming any other resource is silently ignored and never expands.
 func TestGroupCarrierExpandableTargetsItsOwnPrincipal(t *testing.T) {
 	subject := rbacv1.Subject{Kind: SubjectKindGroup, Name: "prod-developer", APIGroup: RBACAPIGroup}
 
@@ -196,10 +183,8 @@ func TestGroupCarrierExpandableTargetsItsOwnPrincipal(t *testing.T) {
 	}
 }
 
-// TestCarrierAndDurableGrantIDsDiffer verifies the two grants for one subject
-// are distinct objects. A grant's identity is (principal, entitlement), so
-// putting the carrier on the same principal as the durable grant would collapse
-// them into one and the durable grant would be lost.
+// TestCarrierAndDurableGrantIDsDiffer: grant identity is (principal,
+// entitlement), so sharing a principal would collapse the two into one.
 func TestCarrierAndDurableGrantIDsDiffer(t *testing.T) {
 	for _, subject := range []rbacv1.Subject{
 		{Kind: SubjectKindUser, Name: "alice", APIGroup: RBACAPIGroup},
@@ -214,9 +199,8 @@ func TestCarrierAndDurableGrantIDsDiffer(t *testing.T) {
 	}
 }
 
-// TestServiceAccountEmitsNoCarrier verifies a ServiceAccount stays a single
-// grant. It is a real object in the cluster with no directory counterpart, so a
-// carrier for it could only ever match the wrong thing.
+// TestServiceAccountEmitsNoCarrier: a ServiceAccount has no directory
+// counterpart, so a carrier could only match the wrong thing.
 func TestServiceAccountEmitsNoCarrier(t *testing.T) {
 	subject := rbacv1.Subject{Kind: SubjectKindServiceAccount, Name: "argo", Namespace: "argocd"}
 
@@ -228,9 +212,8 @@ func TestServiceAccountEmitsNoCarrier(t *testing.T) {
 	assert.Empty(t, carrierGrants(grants))
 }
 
-// TestSystemSubjectsStillSkipped verifies adding carriers did not widen which
-// subjects the connector emits at all. Kubernetes' built-in system: principals
-// are cluster machinery, not identities any directory knows about.
+// TestSystemSubjectsStillSkipped verifies carriers did not widen which subjects
+// the connector emits.
 func TestSystemSubjectsStillSkipped(t *testing.T) {
 	for _, subject := range []rbacv1.Subject{
 		{Kind: SubjectKindGroup, Name: "system:masters", APIGroup: RBACAPIGroup},
@@ -244,10 +227,8 @@ func TestSystemSubjectsStillSkipped(t *testing.T) {
 	}
 }
 
-// TestNonRBACAPIGroupSubjectsSkipped verifies a User or Group subject from an
-// unexpected apiGroup is still rejected rather than turned into a carrier that
-// would claim a directory match on an identity Kubernetes did not authenticate
-// through RBAC.
+// TestNonRBACAPIGroupSubjectsSkipped: an unexpected apiGroup must be rejected,
+// not turned into a carrier claiming a directory match.
 func TestNonRBACAPIGroupSubjectsSkipped(t *testing.T) {
 	subject := rbacv1.Subject{Kind: SubjectKindUser, Name: "alice", APIGroup: "example.com"}
 
@@ -256,9 +237,7 @@ func TestNonRBACAPIGroupSubjectsSkipped(t *testing.T) {
 	assert.Empty(t, grants)
 }
 
-// TestExternalMatchConfigOverrides verifies the configured keys reach the
-// annotations, which is what lets one connector build serve clusters federated
-// against different directories.
+// TestExternalMatchConfigOverrides verifies configured keys reach the annotations.
 func TestExternalMatchConfigOverrides(t *testing.T) {
 	cfg := ExternalMatchConfig{
 		UserMatchKey:  "userPrincipalName",
@@ -282,15 +261,11 @@ func TestExternalMatchConfigOverrides(t *testing.T) {
 	assert.Equal(t, "displayName", pickMatch(t, groupCarrier[0]).GetKey())
 }
 
-// TestGroupCarrierUsesEntrasMemberEntitlement pins the slug to the one Microsoft
-// Entra actually emits.
-//
-// The SDK looks up NewEntitlementID(matchedPrincipal, slug) as an exact string
-// against entitlements copied verbatim from the identity source, and Entra builds
-// its group membership ID by hand as "group:<id>:members" while declaring Slug
-// "member". Taking the Slug field at face value yields "member", which resolves
-// to nothing and silently drops the expansion.
-func TestGroupCarrierUsesEntrasMemberEntitlement(t *testing.T) {
+// TestGroupCarrierMemberEntitlementSlug pins the slug the identity source
+// actually emits. The SDK looks up NewEntitlementID(matchedPrincipal, slug) as an
+// exact string, and a source's entitlement ID and Slug field can disagree —
+// taking the Slug at face value resolves to nothing and drops the expansion.
+func TestGroupCarrierMemberEntitlementSlug(t *testing.T) {
 	grants, err := GrantRoleToSubject(
 		rbacv1.Subject{Kind: SubjectKindGroup, Name: "eng", APIGroup: RBACAPIGroup},
 		testRoleResource, "member", ExternalMatchConfig{})
@@ -310,9 +285,8 @@ func TestGroupCarrierUsesEntrasMemberEntitlement(t *testing.T) {
 	assert.Equal(t, []string{"members"}, slugs)
 }
 
-// TestExternalMatchConfigDefaults verifies the zero value is usable, since the
-// downstream connectors that build this connector as a library may not set it
-// and a partial struct must not produce a carrier with an empty match key.
+// TestExternalMatchConfigDefaults verifies the zero value is usable, since
+// library callers may not set it.
 func TestExternalMatchConfigDefaults(t *testing.T) {
 	got := ExternalMatchConfig{}.withDefaults()
 	assert.Equal(t, DefaultExternalUserMatchKey, got.UserMatchKey)

@@ -56,17 +56,11 @@ func GenerateResourceForGrant(rName string, rType string) *v2.Resource {
 	}
 }
 
-// GrantRoleToSubject renders one RBAC binding subject as the grants that express
-// its access to resource through the entName entitlement.
+// GrantRoleToSubject renders one RBAC binding subject as grants on entName.
 //
-// A ServiceAccount yields exactly one grant: it is a cluster-local object this
-// connector already syncs, so there is nothing to federate. A User or Group
-// yields two — the durable grant against the synced kube_user / kube_group
-// resource, plus an external-match carrier that reaches the identity source.
-// See external_match.go for why both are needed and why the carrier cannot
-// stand alone.
-//
-// It returns an error for a subject kind the connector does not model, which
+// A ServiceAccount yields one grant. A User or Group yields two: the durable
+// grant on kube_user / kube_group, plus an external-match carrier (see
+// external_match.go). Returns an error for subject kinds we do not model, which
 // callers log and skip.
 func GrantRoleToSubject(
 	subject rbacv1.Subject,

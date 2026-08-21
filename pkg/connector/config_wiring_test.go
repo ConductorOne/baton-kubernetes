@@ -200,14 +200,10 @@ func TestDefaultSyncFilterIsRegistered(t *testing.T) {
 		"the default must still be narrower than everything, or it is not a default")
 }
 
-// TestExternalMatchConfigReachesBuilders closes the last hop in the
-// external-matching chain that nothing else covers.
-//
-// The other tests take an ExternalMatchConfig and check the annotations it
-// produces; this one starts where the operator does. A flag that decodes into
-// the generated config struct but never reaches a builder leaves the connector
-// silently matching on the defaults, which looks like a directory that simply
-// does not match rather than like a wiring bug.
+// TestExternalMatchConfigReachesBuilders covers the flag -> config -> builder
+// hop. A key that decodes but never reaches a builder leaves the connector
+// silently matching on defaults, which looks like a directory that just does not
+// match rather than a wiring bug.
 func TestExternalMatchConfigReachesBuilders(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("KUBECONFIG", "")
@@ -226,9 +222,8 @@ func TestExternalMatchConfigReachesBuilders(t *testing.T) {
 		GroupMatchKey: "displayName",
 	}
 
-	// Every builder that emits subject grants has to carry the config; checking
-	// only one would let a missed call site through, which is how the flat and
-	// sparse models could disagree about how a subject is matched.
+	// Check every builder that emits subject grants; one missed call site would
+	// let the flat and sparse models disagree.
 	var checked int
 	for _, s := range builder.ResourceSyncers(context.Background()) {
 		switch b := s.(type) {
