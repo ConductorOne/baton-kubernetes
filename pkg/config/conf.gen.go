@@ -22,6 +22,8 @@ type Kubernetes struct {
 	DisableCompression bool `mapstructure:"disable-compression"`
 	UseRoleAssignments bool `mapstructure:"use-role-assignments"`
 	IncludeSystemObjectPermissions bool `mapstructure:"include-system-object-permissions"`
+	ExternalUserMatchKey string `mapstructure:"external-user-match-key"`
+	ExternalGroupMatchKey string `mapstructure:"external-group-match-key"`
 }
 
 func (c *Kubernetes) findFieldByTag(tagValue string) (any, bool) {

@@ -33,6 +33,12 @@ const (
 	// FlagIncludeSystemObjectPermissions is this connector's own flag, not one
 	// of cli-runtime's.
 	FlagIncludeSystemObjectPermissions = "include-system-object-permissions"
+	// External identity matching flags, also this connector's own. They name the
+	// directory-side fields a Kubernetes User or Group subject is matched on when
+	// an identity source is attached to the app. See
+	// pkg/connector/external_match.go.
+	FlagExternalUserMatchKey  = "external-user-match-key"
+	FlagExternalGroupMatchKey = "external-group-match-key"
 )
 
 var (
@@ -148,6 +154,32 @@ var (
 				" so they are excluded by default. What they permit is reported on API resources regardless."),
 		field.WithDefaultValue(false),
 	)
+	// The external-match fields tune, rather than enable, identity matching:
+	// the connector always emits carrier grants, and they stay inert until an
+	// identity source is attached to the app in C1. What varies per deployment
+	// is which directory field the cluster's subject names correspond to, and
+	// only a deployment federated against something other than an OIDC issuer
+	// needs to say. Defaults live in pkg/connector, the single place that knows
+	// what a carrier claims; an empty value here means "use them".
+	externalUserMatchKeyField = field.StringField(
+		FlagExternalUserMatchKey,
+		field.WithDisplayName("External user match key"),
+		field.WithDescription(
+			"Profile field on the external identity source to match a Kubernetes User subject against."+
+				" Defaults to \"email\", which also matches a user's email addresses."+
+				" Use \"userPrincipalName\" for clusters federated against Microsoft Entra."),
+		field.WithRequired(false),
+	)
+	externalGroupMatchKeyField = field.StringField(
+		FlagExternalGroupMatchKey,
+		field.WithDisplayName("External group match key"),
+		field.WithDescription(
+			"Profile field on the external identity source to match a Kubernetes Group subject against."+
+				" Defaults to \"display_name\", which is where Microsoft Entra publishes a group's name."+
+				" Group subjects are additionally always matched against the external group's ID,"+
+				" which is what AKS clusters use as the group name (an Entra object GUID)."),
+		field.WithRequired(false),
+	)
 )
 
 // ConfigurationFields lists all connector-specific schema fields.
@@ -170,6 +202,8 @@ var ConfigurationFields = []field.SchemaField{
 	disableCompressionField,
 	useRoleAssignmentsField,
 	includeSystemObjectPermissionsField,
+	externalUserMatchKeyField,
+	externalGroupMatchKeyField,
 }
 
 // ConfigRelations lists mutual-exclusivity and required-together constraints.
@@ -194,7 +228,18 @@ var ConfigRelations = []field.SchemaFieldRelationship{
 }
 
 // Configuration is the full connector schema passed to DefineConfiguration.
+//
+// SupportsExternalResources declares that this connector resolves grants against
+// another app's synced principals, which is what makes C1 offer the
+// identity-source picker for the app. Kubernetes needs it because it authorizes
+// identities it does not store — see pkg/connector/external_match.go.
+//
+// It is not what enables the feature locally: --external-resource-c1z and its
+// siblings are part of the SDK's default field set and registered for every
+// connector regardless. Declaring it here is what carries that capability into
+// the platform, where the identity source is actually attached.
 var Configuration = field.NewConfiguration(
 	ConfigurationFields,
 	field.WithConstraints(ConfigRelations...),
+	field.WithSupportsExternalResources(true),
 )

@@ -96,8 +96,16 @@ var (
 		Annotations: optInAnnotations(),
 	}
 	ResourceTypeBinding = &v2.ResourceType{Id: "binding", DisplayName: "Binding", Description: "Internal type for processing RBAC bindings"}
-	ResourceTypeUser    = &v2.ResourceType{Id: "user", DisplayName: SubjectTypeUser, Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_USER}}
-	ResourceTypeGroup   = &v2.ResourceType{Id: "group", DisplayName: SubjectTypeGroup, Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_GROUP}}
+	// ResourceTypeUser and ResourceTypeGroup are the placeholder principal types
+	// that external-match carrier grants point at. No syncer lists them and they
+	// are absent from DeclaredResourceTypeIDs on purpose: a carrier's principal
+	// is a claim about a resource in *another* app, resolved during the SDK's
+	// external-resource pass, and the carrier is deleted once that pass runs.
+	// Registering them would instead invite the platform to sync empty types and
+	// would let a carrier collide with the durable kube_user / kube_group grant
+	// it is meant to accompany. See external_match.go.
+	ResourceTypeUser  = &v2.ResourceType{Id: "user", DisplayName: SubjectTypeUser, Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_USER}}
+	ResourceTypeGroup = &v2.ResourceType{Id: "group", DisplayName: SubjectTypeGroup, Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_GROUP}}
 )
 
 // SparseResourceTypeIDs lists the types belonging to the sparse model, which

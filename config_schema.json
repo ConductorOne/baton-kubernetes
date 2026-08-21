@@ -210,6 +210,22 @@
       "displayName": "Include control-plane permissions on objects",
       "description": "If true, also report permissions held by system: cluster roles on individual objects. These are the Kubernetes control plane's own controllers and they reach every object, so they are excluded by default. What they permit is reported on API resources regardless.",
       "boolField": {}
+    },
+    {
+      "name": "external-user-match-key",
+      "displayName": "External user match key",
+      "description": "Profile field on the external identity source to match a Kubernetes User subject against. Defaults to \"email\", which also matches a user's email addresses. Use \"userPrincipalName\" for clusters federated against Microsoft Entra.",
+      "stringField": {
+        "rules": {}
+      }
+    },
+    {
+      "name": "external-group-match-key",
+      "displayName": "External group match key",
+      "description": "Profile field on the external identity source to match a Kubernetes Group subject against. Defaults to \"display_name\", which is where Microsoft Entra publishes a group's name. Group subjects are additionally always matched against the external group's ID, which is what AKS clusters use as the group name (an Entra object GUID).",
+      "stringField": {
+        "rules": {}
+      }
     }
   ],
   "constraints": [
@@ -255,5 +271,6 @@
         "client-key"
       ]
     }
-  ]
+  ],
+  "supportsExternalResources": true
 }

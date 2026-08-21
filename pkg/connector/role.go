@@ -20,6 +20,9 @@ import (
 type roleBuilder struct {
 	client          kubernetes.Interface
 	bindingProvider RoleBindingProvider
+	// matchCfg names the directory-side fields that external-match carrier
+	// grants claim to match on. See external_match.go.
+	matchCfg ExternalMatchConfig
 }
 
 // ResourceType returns the resource type for Role.
@@ -190,12 +193,12 @@ func (r *roleBuilder) Grants(ctx context.Context, resource *v2.Resource, opts rs
 			if subject.Kind == SubjectKindServiceAccount && subject.Namespace == "" {
 				subject.Namespace = binding.Namespace
 			}
-			subjectGrant, err := GrantRoleToSubject(subject, resource, "member")
+			subjectGrants, err := GrantRoleToSubject(subject, resource, "member", r.matchCfg)
 			if err != nil {
 				l.Debug("subject kind not supported", zap.String("subject kind", subject.Kind))
 				continue
 			}
-			rv = append(rv, subjectGrant)
+			rv = append(rv, subjectGrants...)
 		}
 	}
 
@@ -203,9 +206,10 @@ func (r *roleBuilder) Grants(ctx context.Context, resource *v2.Resource, opts rs
 }
 
 // newRoleBuilder creates a new role builder.
-func newRoleBuilder(client kubernetes.Interface, bindingProvider RoleBindingProvider) *roleBuilder {
+func newRoleBuilder(client kubernetes.Interface, bindingProvider RoleBindingProvider, matchCfg ExternalMatchConfig) *roleBuilder {
 	return &roleBuilder{
 		client:          client,
 		bindingProvider: bindingProvider,
+		matchCfg:        matchCfg,
 	}
 }

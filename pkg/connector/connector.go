@@ -51,6 +51,11 @@ type ConnectorOpts struct {
 	// ClusterName labels the cluster resource. Empty falls back to the API
 	// server host.
 	ClusterName string
+	// ExternalMatch tunes the external-match carrier grants that accompany every
+	// User and Group subject. Its zero value is usable and selects the defaults;
+	// carriers are always emitted, so nothing here turns the feature on or off.
+	// See external_match.go.
+	ExternalMatch ExternalMatchConfig
 }
 
 // ConnectorOption is a function that configures the connector options.
@@ -120,6 +125,23 @@ func WithSystemObjectPermissions(enabled bool) ConnectorOption {
 func WithClusterName(name string) ConnectorOption {
 	return func(opts *ConnectorOpts) error {
 		opts.ClusterName = name
+		return nil
+	}
+}
+
+// WithExternalMatch names the directory-side fields that external-match carrier
+// grants claim to match on.
+//
+// Kubernetes never stores the identities it authorizes, so a User or Group
+// subject is matched against a separate identity source in C1. Which field it
+// matches on is a property of that directory: an OIDC-federated cluster's
+// usernames are email addresses, an Entra-federated cluster's are UPNs. Unset
+// fields fall back to the defaults in external_match.go, which suit the OIDC
+// case; downstream connectors (baton-eks, baton-aks, baton-gke) that know their
+// provider's directory should pass its keys.
+func WithExternalMatch(cfg ExternalMatchConfig) ConnectorOption {
+	return func(opts *ConnectorOpts) error {
+		opts.ExternalMatch = cfg
 		return nil
 	}
 }
@@ -293,6 +315,10 @@ func NewFromConfig(
 		WithRoleAssignments(cfg.UseRoleAssignments),
 		WithSystemObjectPermissions(cfg.IncludeSystemObjectPermissions),
 		WithClusterName(clusterNameFromConfig(opt, cfg)),
+		WithExternalMatch(ExternalMatchConfig{
+			UserMatchKey:  cfg.ExternalUserMatchKey,
+			GroupMatchKey: cfg.ExternalGroupMatchKey,
+		}),
 	)
 	if err != nil {
 		return nil, nil, err
@@ -414,16 +440,16 @@ func (k *Kubernetes) ResourceSyncers(ctx context.Context) []connectorbuilder.Res
 			return newServiceAccountBuilder(k.client, k.permissions())
 		},
 		ResourceTypeRole.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncerV2 {
-			return newRoleBuilder(k.client, k)
+			return newRoleBuilder(k.client, k, k.opts.ExternalMatch)
 		},
 		ResourceTypeClusterRole.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncerV2 {
-			return newClusterRoleBuilder(k.client, k, k.opts.UseRoleAssignments)
+			return newClusterRoleBuilder(k.client, k, k.opts.UseRoleAssignments, k.opts.ExternalMatch)
 		},
 		ResourceTypeCluster.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncerV2 {
 			return newClusterBuilder(k.opts.ClusterName, k.config.Host)
 		},
 		ResourceTypeRoleAssignment.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncerV2 {
-			return newRoleAssignmentBuilder(k.client, k, k.opts.UseRoleAssignments)
+			return newRoleAssignmentBuilder(k.client, k, k.opts.UseRoleAssignments, k.opts.ExternalMatch)
 		},
 		ResourceTypeAPIResource.Id: func(i *kubernetes.Interface, k *Kubernetes) connectorbuilder.ResourceSyncerV2 {
 			return newAPIResourceBuilder(k)
@@ -560,10 +586,10 @@ func (d *defaultCapabilitiesBuilder) ResourceSyncers(_ context.Context) []connec
 	return []connectorbuilder.ResourceSyncerV2{
 		newNamespaceBuilder(nil, nil),
 		newServiceAccountBuilder(nil, nil),
-		newRoleBuilder(nil, nil),
-		newClusterRoleBuilder(nil, nil, false),
+		newRoleBuilder(nil, nil, ExternalMatchConfig{}),
+		newClusterRoleBuilder(nil, nil, false, ExternalMatchConfig{}),
 		newClusterBuilder("", ""),
-		newRoleAssignmentBuilder(nil, nil, true),
+		newRoleAssignmentBuilder(nil, nil, true, ExternalMatchConfig{}),
 		newAPIResourceBuilder(nil),
 		newKubeUserBuilder(nil),
 		newKubeGroupBuilder(nil),

@@ -56,8 +56,24 @@ func GenerateResourceForGrant(rName string, rType string) *v2.Resource {
 	}
 }
 
-func GrantRoleToSubject(subject rbacv1.Subject, resource *v2.Resource, entName string) (*v2.Grant, error) {
-	var grantOpts []grant.GrantOption
+// GrantRoleToSubject renders one RBAC binding subject as the grants that express
+// its access to resource through the entName entitlement.
+//
+// A ServiceAccount yields exactly one grant: it is a cluster-local object this
+// connector already syncs, so there is nothing to federate. A User or Group
+// yields two — the durable grant against the synced kube_user / kube_group
+// resource, plus an external-match carrier that reaches the identity source.
+// See external_match.go for why both are needed and why the carrier cannot
+// stand alone.
+//
+// It returns an error for a subject kind the connector does not model, which
+// callers log and skip.
+func GrantRoleToSubject(
+	subject rbacv1.Subject,
+	resource *v2.Resource,
+	entName string,
+	matchCfg ExternalMatchConfig,
+) ([]*v2.Grant, error) {
 	if subject.Kind == SubjectKindServiceAccount {
 		saName := fmt.Sprintf("%s/%s", subject.Namespace, subject.Name) // SA are always namespaced, even if they can have cluster roles bind to cluster level.
 		saResource := GenerateResourceForGrant(saName, ResourceTypeServiceAccount.Id)
@@ -66,31 +82,39 @@ func GrantRoleToSubject(subject rbacv1.Subject, resource *v2.Resource, entName s
 			entName,
 			saResource,
 		)
-		return g, nil
+		return []*v2.Grant{g}, nil
 	} else if (subject.APIGroup == RBACAPIGroup || subject.APIGroup == RBACAPIGroupV1) &&
 		!strings.Contains(subject.Name, "system:") { // Ignore System subjects
 		if subject.Kind == SubjectKindGroup {
-			// Group grants intentionally carry no GrantExpandable annotation: vanilla
-			// Kubernetes has no membership source to expand through (membership lives
-			// in the authenticator — x509 O= fields, OIDC claims, cloud IAM mappers).
-			// Cloud connectors (EKS/AKS/GKE) add their own expansion annotations paired
-			// with ExternalResourceMatch in their custom builders.
 			groupResource := GenerateResourceForGrant(subject.Name, ResourceTypeKubeGroup.Id)
-			g := grant.NewGrant(
-				resource,
-				entName,
-				groupResource,
-			)
-			return g, nil
+			grants := []*v2.Grant{
+				grant.NewGrant(
+					resource,
+					entName,
+					groupResource,
+				),
+			}
+			carrier, err := matchCfg.groupCarrierGrant(resource, entName, subject.Name)
+			if err != nil {
+				return nil, err
+			}
+			if carrier != nil {
+				grants = append(grants, carrier)
+			}
+			return grants, nil
 		}
 		if subject.Kind == SubjectKindUser {
-			g := grant.NewGrant(
-				resource,
-				entName,
-				GenerateResourceForGrant(subject.Name, ResourceTypeKubeUser.Id),
-				grantOpts...,
-			)
-			return g, nil
+			grants := []*v2.Grant{
+				grant.NewGrant(
+					resource,
+					entName,
+					GenerateResourceForGrant(subject.Name, ResourceTypeKubeUser.Id),
+				),
+			}
+			if carrier := matchCfg.userCarrierGrant(resource, entName, subject.Name); carrier != nil {
+				grants = append(grants, carrier)
+			}
+			return grants, nil
 		}
 	}
 	return nil, fmt.Errorf("unsupported subject type")

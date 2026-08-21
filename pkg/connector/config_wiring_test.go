@@ -108,7 +108,7 @@ func TestRoleAssignmentsEmitNothingWhenDisabled(t *testing.T) {
 		crbFor("view-everywhere", "view", userSubject("alice")),
 	)
 
-	assignments, _, err := newRoleAssignmentBuilder(client, &Kubernetes{client: client}, false).
+	assignments, _, err := newRoleAssignmentBuilder(client, &Kubernetes{client: client}, false, ExternalMatchConfig{}).
 		List(ctx, nil, rs.SyncOpAttrs{SyncID: "sync-1"})
 	require.NoError(t, err)
 	assert.Empty(t, assignments, "role assignments must not be emitted alongside the flat model")
@@ -198,4 +198,50 @@ func TestDefaultSyncFilterIsRegistered(t *testing.T) {
 	}
 	assert.Less(t, len(defaults), len(AllResourceTypeIDs),
 		"the default must still be narrower than everything, or it is not a default")
+}
+
+// TestExternalMatchConfigReachesBuilders closes the last hop in the
+// external-matching chain that nothing else covers.
+//
+// The other tests take an ExternalMatchConfig and check the annotations it
+// produces; this one starts where the operator does. A flag that decodes into
+// the generated config struct but never reaches a builder leaves the connector
+// silently matching on the defaults, which looks like a directory that simply
+// does not match rather than like a wiring bug.
+func TestExternalMatchConfigReachesBuilders(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("KUBECONFIG", "")
+
+	builder, _, err := NewFromConfig(context.Background(), &pkgconfig.Kubernetes{
+		Server:                "https://127.0.0.1:65535",
+		Token:                 "fake-token",
+		InsecureSkipTlsVerify: true,
+		ExternalUserMatchKey:  "userPrincipalName",
+		ExternalGroupMatchKey: "displayName",
+	}, nil)
+	require.NoError(t, err)
+
+	want := ExternalMatchConfig{
+		UserMatchKey:  "userPrincipalName",
+		GroupMatchKey: "displayName",
+	}
+
+	// Every builder that emits subject grants has to carry the config; checking
+	// only one would let a missed call site through, which is how the flat and
+	// sparse models could disagree about how a subject is matched.
+	var checked int
+	for _, s := range builder.ResourceSyncers(context.Background()) {
+		switch b := s.(type) {
+		case *roleBuilder:
+			assert.Equal(t, want, b.matchCfg, "role builder")
+			checked++
+		case *clusterRoleBuilder:
+			assert.Equal(t, want, b.matchCfg, "cluster role builder")
+			checked++
+		case *roleAssignmentBuilder:
+			assert.Equal(t, want, b.matchCfg, "role assignment builder")
+			checked++
+		}
+	}
+	assert.Equal(t, 3, checked, "every subject-granting builder must receive the match config")
 }

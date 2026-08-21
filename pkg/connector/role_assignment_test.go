@@ -45,7 +45,7 @@ func userSubject(name string) rbacv1.Subject {
 // Kubernetes connector so the binding cache and lookups behave as in production.
 func newRoleAssignmentFixture(objects ...runtime.Object) *roleAssignmentBuilder {
 	client := fake.NewSimpleClientset(objects...)
-	return newRoleAssignmentBuilder(client, &Kubernetes{client: client}, true)
+	return newRoleAssignmentBuilder(client, &Kubernetes{client: client}, true, ExternalMatchConfig{})
 }
 
 // listAssignmentIDs drains List and returns the object IDs it emitted.
@@ -179,7 +179,7 @@ func TestRoleAssignmentGrantsDedupeSubjects(t *testing.T) {
 	require.NoError(t, err)
 
 	principals := []string{}
-	for _, g := range grants {
+	for _, g := range durableGrants(grants) {
 		principals = append(principals, g.GetPrincipal().GetId().GetResource())
 	}
 	assert.ElementsMatch(t, []string{"alice", "bob"}, principals,
@@ -204,7 +204,7 @@ func TestRoleAssignmentGrantsScopedToNamespace(t *testing.T) {
 	for _, r := range resources {
 		grants, _, err := b.Grants(ctx, r, rs.SyncOpAttrs{SyncID: "sync-1"})
 		require.NoError(t, err)
-		for _, g := range grants {
+		for _, g := range durableGrants(grants) {
 			got[r.GetId().GetResource()] = append(got[r.GetId().GetResource()], g.GetPrincipal().GetId().GetResource())
 		}
 	}
@@ -341,7 +341,7 @@ func TestClusterRoleSuppressedUnderRoleAssignments(t *testing.T) {
 		DisplayName: "view",
 	}
 
-	flat := newClusterRoleBuilder(client, k8s, false)
+	flat := newClusterRoleBuilder(client, k8s, false, ExternalMatchConfig{})
 	ents, _, err := flat.Entitlements(ctx, resource, rs.SyncOpAttrs{SyncID: "sync-1"})
 	require.NoError(t, err)
 	assert.NotEmpty(t, ents, "the flat model must still declare cluster role entitlements")
@@ -349,7 +349,7 @@ func TestClusterRoleSuppressedUnderRoleAssignments(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotEmpty(t, grants)
 
-	sparse := newClusterRoleBuilder(client, k8s, true)
+	sparse := newClusterRoleBuilder(client, k8s, true, ExternalMatchConfig{})
 	ents, _, err = sparse.Entitlements(ctx, resource, rs.SyncOpAttrs{SyncID: "sync-2"})
 	require.NoError(t, err)
 	assert.Empty(t, ents, "role_assignment expresses this access instead")
