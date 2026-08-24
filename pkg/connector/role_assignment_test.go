@@ -372,3 +372,41 @@ func TestRoleAssignmentStaticEntitlement(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, perResource, "per-resource entitlements would defeat the sparse model")
 }
+
+// TestRoleAssignmentPagesByKey covers the second caller of pageBounds. Both this
+// builder and api_resource resume from the last key emitted rather than an index,
+// and they now share that logic, so each caller needs a multi-page test or a
+// change to the shared helper can break one while the other still passes.
+func TestRoleAssignmentPagesByKey(t *testing.T) {
+	b := newRoleAssignmentFixture(
+		clusterRole("view"), clusterRole("edit"), clusterRole("admin"),
+		crbFor("view-all", "view", userSubject("alice")),
+		crbFor("edit-all", "edit", userSubject("bob")),
+		rbFor("admin-team-a", "team-a", RBACKindClusterRole, "admin", userSubject("carol")),
+		rbFor("view-team-b", "team-b", RBACKindClusterRole, "view", userSubject("dave")),
+	)
+
+	ctx := context.Background()
+	var ids []string
+	token := ""
+	for pages := 0; ; pages++ {
+		require.Less(t, pages, 10, "paging must terminate")
+		resources, results, err := b.List(ctx, nil, rs.SyncOpAttrs{
+			SyncID:    "sync-1",
+			PageToken: paginationTokenWithSize(token, 1),
+		})
+		require.NoError(t, err)
+		require.LessOrEqual(t, len(resources), 1, "one per page was requested")
+		for _, r := range resources {
+			ids = append(ids, r.GetId().GetResource())
+		}
+		if results == nil || results.NextPageToken == "" {
+			break
+		}
+		token = results.NextPageToken
+	}
+
+	sort.Strings(ids)
+	assert.Equal(t, []string{"cluster:edit", "cluster:view", "ns:team-a:admin", "ns:team-b:view"}, ids,
+		"every pair exactly once, in order, across single-item pages")
+}

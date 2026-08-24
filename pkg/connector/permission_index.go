@@ -95,27 +95,6 @@ func addressesObject(verb, resource string) bool {
 	return objectVerbs[verb]
 }
 
-// instanceResourceTypes maps an API resource plural onto the resource type this
-// connector models its objects with, for the resourceNames rules that really do
-// target one object.
-//
-// Deliberately excludes roles and clusterroles: those resources carry
-// membership entitlements whose emission the sparse model suppresses, so
-// hanging permission entitlements on them too would make what a review sees
-// depend on --use-role-assignments. A rule naming them by name is still
-// recorded at class level.
-var instanceResourceTypes = map[string]*v2.ResourceType{
-	pluralPods:            ResourceTypePod,
-	pluralSecrets:         ResourceTypeSecret,
-	pluralConfigMaps:      ResourceTypeConfigMap,
-	pluralDeployments:     ResourceTypeDeployment,
-	pluralStatefulSets:    ResourceTypeStatefulSet,
-	pluralDaemonSets:      ResourceTypeDaemonSet,
-	pluralNodes:           ResourceTypeNode,
-	pluralNamespaces:      ResourceTypeNamespace,
-	pluralServiceAccounts: ResourceTypeServiceAccount,
-}
-
 // clusterScopedInstanceTypes are the instance types whose objects are not
 // namespaced, so a resourceNames rule identifies them by bare name.
 var clusterScopedInstanceTypes = map[string]bool{
@@ -131,9 +110,19 @@ type instanceKind struct {
 	resource *v2.ResourceType
 }
 
-// instanceKinds is instanceResourceTypes in matchable form. The group is known
-// statically for every type the connector syncs — a Deployment is always
-// apps/deployments — so nothing has to be inferred from the rule side.
+// instanceKinds is every object type this connector models, with the API resource
+// it is, so a rule can be matched against it. The group is known statically for
+// every type the connector syncs — a Deployment is always apps/deployments — so
+// nothing has to be inferred from the rule side.
+//
+// This is the only such table: matching a rule to an object type goes through it
+// from both the wholesale and the named-object path, so the two can never
+// disagree about which kind a rule reaches.
+//
+// Roles and cluster roles are deliberately absent. They carry membership
+// entitlements whose emission the sparse model suppresses, so hanging permission
+// entitlements on them too would make what a review shows depend on
+// --use-role-assignments. A rule naming them is still recorded at class level.
 var instanceKinds = []instanceKind{
 	{"", pluralPods, ResourceTypePod},
 	{"", pluralSecrets, ResourceTypeSecret},
@@ -348,6 +337,9 @@ type PermissionIndex struct {
 	// the object-addressable half of each rule. Objects are not known when the
 	// index is built, so a builder looks this up per object it lists.
 	objects map[objectScope]map[string][]principalRef
+	// merged is objects with each namespace scope already unioned with the
+	// cluster-wide one, so the object layer never recomputes it per object.
+	merged map[objectScope]map[string][]principalRef
 	// inertRules counts rules that can never authorize anything in the scope
 	// they were bound in, and so produce no edge.
 	inertRules int
@@ -393,12 +385,37 @@ func (i *PermissionIndex) Principals(class permissionClass, verb string) []princ
 }
 
 // objectPermissions returns what every object of one type carries in one scope,
-// keyed by entitlement slug.
+// keyed by entitlement slug, before the cluster-wide rules are merged in.
 func (i *PermissionIndex) objectPermissions(scope objectScope) map[string][]principalRef {
 	if i == nil {
 		return nil
 	}
 	return i.objects[scope]
+}
+
+// mergedObjectPermissions returns the wholesale permissions an object of this type
+// carries in this namespace, cluster-wide rules included. An empty namespace means
+// a cluster-scoped object, which only cluster-wide rules can reach.
+func (i *PermissionIndex) mergedObjectPermissions(resourceTypeID, namespace string) map[string][]principalRef {
+	if i == nil {
+		return nil
+	}
+	if namespace != "" {
+		if scoped, ok := i.merged[objectScope{
+			resourceType: resourceTypeID,
+			scopeType:    ResourceTypeNamespace.Id,
+			scopeID:      namespace,
+		}]; ok {
+			return scoped
+		}
+		// No rule is bound in that namespace, so only the cluster-wide ones reach
+		// this object.
+	}
+	return i.merged[objectScope{
+		resourceType: resourceTypeID,
+		scopeType:    ResourceTypeCluster.Id,
+		scopeID:      clusterScopeID,
+	}]
 }
 
 // namedVerbs returns the verbs a resourceNames rule confers on one real object,
@@ -431,13 +448,14 @@ type permissionResolver struct {
 	provider PermissionIndexProvider
 }
 
-// objectPermissions returns everything one object carries: the permissions every
-// object of its type carries in its scope, plus any a resourceNames rule confers
-// on it specifically.
+// objectPermissions returns everything one object carries: the wholesale
+// permissions every object of its type carries in its scope, plus any a
+// resourceNames rule confers on it specifically.
 //
-// Cluster-wide rules are merged in for a namespaced object, because a
-// ClusterRoleBinding reaches every namespace — including the one this object
-// lives in.
+// The wholesale half is precomputed per (type, scope) at index build time, so this
+// is a lookup rather than a merge. An object no rule names — the common case —
+// gets that map handed straight back, so a cluster of 5,000 pods costs 5,000 map
+// lookups rather than 5,000 merges. The returned map must not be mutated.
 func (r *permissionResolver) objectPermissions(
 	ctx context.Context,
 	syncID string,
@@ -452,46 +470,24 @@ func (r *permissionResolver) objectPermissions(
 		return nil, err
 	}
 
-	merged := map[string][]principalRef{}
-	add := func(from map[string][]principalRef) {
-		for slug, principals := range from {
-			merged[slug] = append(merged[slug], principals...)
-		}
-	}
-
-	add(index.objectPermissions(objectScope{
-		resourceType: resourceType.Id,
-		scopeType:    ResourceTypeCluster.Id,
-		scopeID:      clusterScopeID,
-	}))
-	if namespace := objectNamespace(resource); namespace != "" {
-		add(index.objectPermissions(objectScope{
-			resourceType: resourceType.Id,
-			scopeType:    ResourceTypeNamespace.Id,
-			scopeID:      namespace,
-		}))
-	}
-	add(index.namedVerbs(namedObject{
+	wholesale := index.mergedObjectPermissions(resourceType.Id, objectNamespace(resource))
+	named := index.namedVerbs(namedObject{
 		resourceType: resourceType.Id,
 		objectID:     resource.GetId().GetResource(),
-	}))
-
-	for slug := range merged {
-		if !declaresObjectPermission(resourceType.Id, slug) {
-			// The type declares a fixed set, so a grant outside it would point at
-			// an entitlement nothing ever created. Reaching here means either the
-			// subresource does not exist on this cluster — in which case the rule
-			// authorizes nothing and dropping it is correct — or the table in
-			// object_permissions.go has fallen behind a Kubernetes release.
-			ctxzap.Extract(ctx).Debug("dropping permission the resource type does not declare",
-				zap.String("resource_type", resourceType.Id),
-				zap.String("slug", slug))
-			delete(merged, slug)
-			continue
-		}
-		merged[slug] = dedupePrincipals(merged[slug])
+	})
+	if len(named) == 0 {
+		return wholesale, nil
 	}
-	return merged, nil
+
+	// Only an object some rule names by name pays for a merge.
+	combined := make(map[string][]principalRef, len(wholesale)+len(named))
+	for slug, principals := range wholesale {
+		combined[slug] = principals
+	}
+	for slug, principals := range named {
+		combined[slug] = dedupePrincipals(append(append([]principalRef{}, combined[slug]...), principals...))
+	}
+	return combined, nil
 }
 
 // objectNamespace returns the namespace an object lives in, taken from its parent
@@ -689,7 +685,7 @@ func buildPermissionIndex(
 		}
 	}
 
-	index := b.finish()
+	index := b.finish(ctx)
 	l.Debug("permission index built",
 		zap.Int("classes", len(index.sorted)),
 		zap.Int("named_objects", len(index.named)),
@@ -822,7 +818,7 @@ func (b *permissionIndexBuilder) addRule(rule rbacv1.PolicyRule, src ruleSource)
 				narrowed.name = name
 				b.addClass(narrowed, gated, src.principal)
 			}
-			b.addNamedObjects(rule, resource, kind, gated, src)
+			b.addNamedObjects(rule, group, resource, gated, src)
 		}
 	}
 }
@@ -875,31 +871,49 @@ func (b *permissionIndexBuilder) addClass(class permissionClass, verbs []string,
 	}
 }
 
-// addNamedObjects records the edges a resourceNames rule puts on the real
-// objects it names.
+// addNamedObjects records the edges a resourceNames rule puts on the real objects
+// it names.
+//
+// Matching goes through instanceKinds, the same path the class layer uses, so the
+// rule's API group is honoured here too. Resolving from the plural alone would
+// contradict the reason the group is part of a class ID at all: a rule naming
+// metrics.k8s.io/nodes would land a grant on the core Node object, and one naming
+// the dead extensions/deployments would produce an object grant Kubernetes never
+// honours.
 func (b *permissionIndexBuilder) addNamedObjects(
 	rule rbacv1.PolicyRule,
-	resource, kind string,
+	group, resource string,
 	verbs []string,
 	src ruleSource,
 ) {
-	resourceType, ok := instanceResourceTypes[kind]
-	if !ok {
-		// No resource type models this kind's objects, so there is no object to
-		// point at. The narrowed target still records the permission.
-		return
+	subresource := ""
+	if slash := strings.Index(resource, "/"); slash >= 0 {
+		subresource = resource[slash+1:]
 	}
-	for _, verb := range verbs {
-		slug := objectEntitlementSlug(resource, verb)
-		for _, name := range rule.ResourceNames {
-			objectID, ok := instanceObjectID(resourceType, src.scopeType, src.scopeID, name)
-			if !ok {
-				continue
+
+	for _, kind := range instanceKinds {
+		if !kind.matches(group, resource) {
+			continue
+		}
+		if !b.hasSubresource(kind, subresource) {
+			// Same reasoning as the class layer: a rule over a subresource this
+			// kind does not have authorizes nothing against it.
+			continue
+		}
+		for _, verb := range verbs {
+			for _, slug := range objectSlugsFor(kind.resource.Id, resource, verb) {
+				for _, name := range rule.ResourceNames {
+					objectID, ok := instanceObjectID(kind.resource, src.scopeType, src.scopeID, name)
+					if !ok {
+						continue
+					}
+					// Not filtered by control-plane origin, unlike the wholesale
+					// permissions: a rule naming one object is precise and there is
+					// one of it, so it carries none of the volume that filter
+					// exists for.
+					b.addNamed(namedObject{resourceType: kind.resource.Id, objectID: objectID}, slug, src.principal)
+				}
 			}
-			// Not filtered by control-plane origin, unlike the wholesale
-			// permissions below: a rule naming one object is precise and there is
-			// one of it, so it carries none of the volume that filter exists for.
-			b.addNamed(namedObject{resourceType: resourceType.Id, objectID: objectID}, slug, src.principal)
 		}
 	}
 }
@@ -972,13 +986,14 @@ func (b *permissionIndexBuilder) addObjectPermissions(
 				bySlug = map[string]map[principalRef]struct{}{}
 				b.objects[scope] = bySlug
 			}
-			slug := objectEntitlementSlug(resource, verb)
-			principals, ok := bySlug[slug]
-			if !ok {
-				principals = map[principalRef]struct{}{}
-				bySlug[slug] = principals
+			for _, slug := range objectSlugsFor(kind.resource.Id, resource, verb) {
+				principals, ok := bySlug[slug]
+				if !ok {
+					principals = map[principalRef]struct{}{}
+					bySlug[slug] = principals
+				}
+				principals[src.principal] = struct{}{}
 			}
-			principals[src.principal] = struct{}{}
 		}
 	}
 }
@@ -998,7 +1013,7 @@ func instanceObjectID(resourceType *v2.ResourceType, scopeType, scopeID, name st
 	return scopeID + "/" + name, true
 }
 
-func (b *permissionIndexBuilder) finish() *PermissionIndex {
+func (b *permissionIndexBuilder) finish(ctx context.Context) *PermissionIndex {
 	index := &PermissionIndex{
 		classes:    make(map[permissionClass]map[string][]principalRef, len(b.classes)),
 		byID:       make(map[string]permissionClass, len(b.classes)),
@@ -1015,13 +1030,81 @@ func (b *permissionIndexBuilder) finish() *PermissionIndex {
 	// Sorted so paging is stable across calls; map order is not.
 	sort.Slice(index.sorted, func(i, j int) bool { return index.sorted[i].less(index.sorted[j]) })
 
-	for object, byVerb := range b.named {
-		index.named[object] = sortedPrincipals(byVerb)
+	dropped := map[string]int{}
+	for object, bySlug := range b.named {
+		index.named[object] = b.declaredOnly(object.resourceType, sortedPrincipals(bySlug), dropped)
 	}
 	for scope, bySlug := range b.objects {
-		index.objects[scope] = sortedPrincipals(bySlug)
+		index.objects[scope] = b.declaredOnly(scope.resourceType, sortedPrincipals(bySlug), dropped)
+	}
+	// Every object of a type in one scope carries the same wholesale permissions:
+	// its namespace's rules plus the cluster-wide ones. Merging that here rather
+	// than per object is what keeps the object layer from re-doing the same work
+	// once per pod — only resourceNames varies object to object.
+	index.merged = mergeObjectScopes(index.objects)
+
+	l := ctxzap.Extract(ctx)
+	for slug, count := range dropped {
+		// Logged once per slug rather than once per object. Reaching here means
+		// either the subresource does not exist on this cluster, in which case the
+		// rule authorizes nothing and dropping it is correct, or the table in
+		// object_permissions.go has fallen behind a Kubernetes release.
+		l.Debug("dropping object permission the resource type does not declare",
+			zap.String("slug", slug),
+			zap.Int("occurrences", count))
 	}
 	return index
+}
+
+// declaredOnly removes slugs the type does not declare, so no grant can reference
+// an entitlement nothing ever created.
+func (b *permissionIndexBuilder) declaredOnly(
+	resourceTypeID string,
+	bySlug map[string][]principalRef,
+	dropped map[string]int,
+) map[string][]principalRef {
+	for slug := range bySlug {
+		if !declaresObjectPermission(resourceTypeID, slug) {
+			dropped[resourceTypeID+":"+slug]++
+			delete(bySlug, slug)
+		}
+	}
+	return bySlug
+}
+
+// mergeObjectScopes precomputes, per (type, namespace), the union of that
+// namespace's permissions and the cluster-wide ones — a ClusterRoleBinding reaches
+// every namespace, including the one an object happens to live in.
+//
+// The result is read-only: objectPermissions hands it straight back when an object
+// has no resourceNames edges of its own, which is the common case and means no
+// allocation per object at all.
+func mergeObjectScopes(objects map[objectScope]map[string][]principalRef) map[objectScope]map[string][]principalRef {
+	merged := make(map[objectScope]map[string][]principalRef, len(objects))
+	for scope, bySlug := range objects {
+		if scope.scopeType == ResourceTypeCluster.Id {
+			merged[scope] = bySlug
+			continue
+		}
+		clusterWide := objects[objectScope{
+			resourceType: scope.resourceType,
+			scopeType:    ResourceTypeCluster.Id,
+			scopeID:      clusterScopeID,
+		}]
+		if len(clusterWide) == 0 {
+			merged[scope] = bySlug
+			continue
+		}
+		combined := make(map[string][]principalRef, len(bySlug)+len(clusterWide))
+		for slug, principals := range clusterWide {
+			combined[slug] = principals
+		}
+		for slug, principals := range bySlug {
+			combined[slug] = dedupePrincipals(append(append([]principalRef{}, combined[slug]...), principals...))
+		}
+		merged[scope] = combined
+	}
+	return merged
 }
 
 // sortedPrincipals flattens the dedup sets into stable slices, so two syncs of

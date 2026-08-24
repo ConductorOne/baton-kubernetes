@@ -568,3 +568,96 @@ func TestTotalDiscoveryFailureStillSyncs(t *testing.T) {
 	// endpoint, because the declared set is fixed rather than discovered.
 	assert.NotContains(t, granted, "update:scale")
 }
+
+// TestNamedObjectHonoursTheAPIGroup pins that the named-object path applies the
+// same group check as the class layer. Resolving from the resource plural alone
+// would contradict the reason a class ID carries its group: a rule naming
+// metrics.k8s.io/nodes would land a grant on the core Node object.
+func TestNamedObjectHonoursTheAPIGroup(t *testing.T) {
+	metrics := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{Name: "metrics-reader"},
+		Rules: rules(
+			rule([]string{"metrics.k8s.io"}, []string{pluralNodes}, []string{verbGet}, "node-1"),
+			// The dead group: Kubernetes has not served it since 1.16.
+			rule([]string{"extensions"}, []string{pluralDeployments}, []string{verbGet}, "web"),
+		),
+	}
+	client := fake.NewSimpleClientset(metrics,
+		crbFor("metrics-reader", "metrics-reader", userSubject("alice@example.com")))
+	client.Resources = apiResourceLists()
+
+	k := &Kubernetes{client: client, opts: ConnectorOpts{}}
+	index, err := buildPermissionIndex(context.Background(), client, k, "sync-1", false, false)
+	require.NoError(t, err)
+
+	assert.Empty(t, index.namedVerbs(namedObject{resourceType: ResourceTypeNode.Id, objectID: "node-1"}),
+		"metrics.k8s.io/nodes is not core/nodes")
+	assert.Empty(t, index.namedVerbs(namedObject{resourceType: ResourceTypeDeployment.Id, objectID: "team-a/web"}),
+		"extensions/deployments reaches nothing")
+
+	// Both are still recorded as narrowed class targets, which is where a rule
+	// Kubernetes ignores stays visible without asserting object access.
+	_, ok := index.Class("metrics.k8s.io:nodes:node-1@*")
+	assert.True(t, ok)
+}
+
+// TestWildcardVerbOnSubresourceExpands pins that "*" on a subresource becomes the
+// verbs that subresource accepts, rather than a `*:exec` slug nothing declares and
+// the clamp would drop.
+func TestWildcardVerbOnSubresourceExpands(t *testing.T) {
+	debugger := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{Name: "pod-debugger"},
+		Rules:      rules(rule([]string{""}, []string{"pods/exec"}, []string{verbAll})),
+	}
+	client := fake.NewSimpleClientset(debugger,
+		crbFor("pod-debugger", "pod-debugger", userSubject("alice@example.com")))
+	client.Resources = apiResourceLists()
+
+	k := &Kubernetes{client: client, opts: ConnectorOpts{}}
+	index, err := buildPermissionIndex(context.Background(), client, k, "sync-1", false, false)
+	require.NoError(t, err)
+
+	pod, err := rs.NewResource("api-server", ResourceTypePod, "team-a/api-server")
+	require.NoError(t, err)
+	resolver := &permissionResolver{provider: stubProvider{index: index}}
+	granted, err := resolver.objectPermissions(context.Background(), "sync-1", ResourceTypePod, pod)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"create:exec", "get:exec"}, sortedSlugs(granted),
+		"the wildcard becomes what pods/exec actually accepts")
+	assert.NotContains(t, granted, "*:exec")
+}
+
+// TestWholesalePermissionsAreSharedAcrossObjects pins the precomputation: two
+// objects of a type in the same namespace, neither named by a rule, read the same
+// map rather than each rebuilding it.
+func TestWholesalePermissionsAreSharedAcrossObjects(t *testing.T) {
+	index := permissionFixture(t, false)
+	resolver := &permissionResolver{provider: stubProvider{index: index}}
+
+	namespaceID, err := NamespaceResourceID("team-a")
+	require.NoError(t, err)
+	first, err := rs.NewResource("a", ResourceTypePod, "team-a/a", rs.WithParentResourceID(namespaceID))
+	require.NoError(t, err)
+	second, err := rs.NewResource("b", ResourceTypePod, "team-a/b", rs.WithParentResourceID(namespaceID))
+	require.NoError(t, err)
+
+	firstPerms, err := resolver.objectPermissions(context.Background(), "sync-1", ResourceTypePod, first)
+	require.NoError(t, err)
+	secondPerms, err := resolver.objectPermissions(context.Background(), "sync-1", ResourceTypePod, second)
+	require.NoError(t, err)
+
+	require.NotEmpty(t, firstPerms)
+	assert.Equal(t, fmt.Sprintf("%p", firstPerms), fmt.Sprintf("%p", secondPerms),
+		"siblings no rule names must share the precomputed map")
+
+	// Cluster-wide rules still reach an object in a namespace that has none of
+	// its own.
+	otherNamespaceID, err := NamespaceResourceID("team-b")
+	require.NoError(t, err)
+	elsewhere, err := rs.NewResource("c", ResourceTypePod, "team-b/c", rs.WithParentResourceID(otherNamespaceID))
+	require.NoError(t, err)
+	elsewherePerms, err := resolver.objectPermissions(context.Background(), "sync-1", ResourceTypePod, elsewhere)
+	require.NoError(t, err)
+	assert.NotEmpty(t, elsewherePerms, "a ClusterRoleBinding reaches every namespace")
+}

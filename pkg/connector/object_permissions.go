@@ -3,6 +3,7 @@ package connector
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/types/entitlement"
@@ -103,6 +104,35 @@ func objectSlugs(subresources ...subresource) []string {
 	}
 	sort.Strings(slugs)
 	return slugs
+}
+
+// objectSlugsFor returns the entitlement slugs one (resource, verb) pair puts on
+// an object of this type.
+//
+// Usually one. A wildcard verb on a subresource is the exception: a rule granting
+// "*" on pods/exec permits every verb that endpoint accepts, and there is no
+// `*:exec` entitlement to hang that on — nor should there be, since "create exec"
+// and "get exec" say what the rule actually permits. So it expands to the
+// subresource's declared verbs instead of collapsing to a slug nothing declares.
+func objectSlugsFor(resourceTypeID, resource, verb string) []string {
+	slug := objectEntitlementSlug(resource, verb)
+	if verb != verbAll || !strings.Contains(resource, "/") {
+		return []string{slug}
+	}
+
+	suffix := slug[len(verbAll):] // ":<subresource>"
+	expanded := make([]string, 0, 4)
+	for _, declared := range objectPermissionSets[resourceTypeID] {
+		if declared != slug && strings.HasSuffix(declared, suffix) {
+			expanded = append(expanded, declared)
+		}
+	}
+	if len(expanded) == 0 {
+		// Nothing declares that subresource; the caller's clamp drops it, and the
+		// api_resource target still carries what the rule said.
+		return []string{slug}
+	}
+	return expanded
 }
 
 // declaresObjectPermission reports whether a type declares this slug, so a grant

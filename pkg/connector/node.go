@@ -118,11 +118,9 @@ func (n *nodeBuilder) Entitlements(_ context.Context, _ *v2.Resource, _ rs.SyncO
 // through each one's membership entitlement so the subjects holding the role
 // inherit the permission.
 func (n *nodeBuilder) Grants(ctx context.Context, resource *v2.Resource, opts rs.SyncOpAttrs) ([]*v2.Grant, *rs.SyncOpResults, error) {
+	// objectGrants returns no grants alongside an error, so this needs no branch.
 	grants, err := objectGrants(ctx, n.perms, opts, ResourceTypeNode, resource)
-	if err != nil {
-		return nil, nil, err
-	}
-	return grants, nil, nil
+	return grants, nil, err
 }
 
 // newNodeBuilder creates a new node builder.

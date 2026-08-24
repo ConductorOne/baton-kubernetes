@@ -130,17 +130,8 @@ func (b *roleAssignmentBuilder) List(ctx context.Context, _ *v2.ResourceId, opts
 	if err != nil {
 		return nil, nil, err
 	}
-	offset := 0
-	if cursor != nil {
-		// First pair strictly after the last one emitted. The list is sorted, so
-		// this resumes correctly even though it was rebuilt from cluster state
-		// that may have changed since the previous page.
-		offset = sort.Search(len(pairs), func(i int) bool { return cursor.less(pairs[i].key) })
-	}
-	end := len(pairs)
-	if limit := pageLimit(opts.PageToken.Size); offset+limit < end {
-		end = offset + limit
-	}
+	offset, end := pageBounds(pairs, cursor, opts.PageToken.Size,
+		func(key assignmentKey, pair assignmentPair) bool { return key.less(pair.key) })
 
 	var rv []*v2.Resource
 	for _, pair := range pairs[offset:end] {
@@ -441,17 +432,9 @@ func (b *roleAssignmentBuilder) knownClusterRoles(ctx context.Context, syncID st
 	return names, nil
 }
 
-// assignmentCursor is the page token: the last (cluster role, scope) pair
-// emitted, rather than an index into the list.
-//
-// An index does not survive the cross-process resume the rest of this connector
-// is built for. A resumed sync rebuilds the pair list from current cluster
-// state, so if any pair sorting before the index disappeared meanwhile,
-// everything after it shifts down and whichever pair lands on the old index is
-// never emitted — silently, because nothing errors. Resuming from the first
-// pair after a recorded key is self-correcting: bindings appearing or
-// disappearing before the cursor change which pairs remain, not which are
-// skipped.
+// assignmentCursor is the wire form of the page token: the last (cluster role,
+// scope) pair emitted, rather than an index into the list. See pageBounds for why
+// the key rather than the index.
 type assignmentCursor struct {
 	ScopeType string `json:"scopeType"`
 	ScopeID   string `json:"scopeID"`

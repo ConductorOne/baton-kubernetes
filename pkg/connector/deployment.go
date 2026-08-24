@@ -129,11 +129,9 @@ func (d *deploymentBuilder) Entitlements(_ context.Context, _ *v2.Resource, _ rs
 // through each one's membership entitlement so the subjects holding the role
 // inherit the permission.
 func (d *deploymentBuilder) Grants(ctx context.Context, resource *v2.Resource, opts rs.SyncOpAttrs) ([]*v2.Grant, *rs.SyncOpResults, error) {
+	// objectGrants returns no grants alongside an error, so this needs no branch.
 	grants, err := objectGrants(ctx, d.perms, opts, ResourceTypeDeployment, resource)
-	if err != nil {
-		return nil, nil, err
-	}
-	return grants, nil, nil
+	return grants, nil, err
 }
 
 // newDeploymentBuilder creates a new deployment builder.

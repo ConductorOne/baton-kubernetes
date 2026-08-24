@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sort"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/types/entitlement"
@@ -44,17 +43,8 @@ func (b *apiResourceBuilder) List(ctx context.Context, _ *v2.ResourceId, opts rs
 	if err != nil {
 		return nil, nil, err
 	}
-	offset := 0
-	if cursor != nil {
-		// First class strictly after the last one emitted. The list is sorted,
-		// so this resumes correctly even though it was rebuilt from cluster
-		// state that may have changed since the previous page.
-		offset = sort.Search(len(classes), func(i int) bool { return cursor.less(classes[i]) })
-	}
-	end := len(classes)
-	if limit := pageLimit(opts.PageToken.Size); offset+limit < end {
-		end = offset + limit
-	}
+	offset, end := pageBounds(classes, cursor, opts.PageToken.Size,
+		func(key, class permissionClass) bool { return key.less(class) })
 
 	var rv []*v2.Resource
 	for _, class := range classes[offset:end] {
@@ -200,15 +190,9 @@ func (b *apiResourceBuilder) classFor(ctx context.Context, resource *v2.Resource
 	return class, index.Verbs(class), nil
 }
 
-// permissionClassCursor is the page token: the last class emitted, rather than
-// an index into the derived list.
-//
-// An index does not survive the cross-process resume the rest of this connector
-// is built for. A resumed sync rebuilds the class list from current cluster
-// state, so if any class sorting before the index disappeared meanwhile,
-// everything after it shifts down and whichever class lands on the old index is
-// never emitted — silently. Resuming from the first class after a recorded key
-// is self-correcting.
+// permissionClassCursor is the wire form of the page token: the last class
+// emitted, rather than an index into the derived list. See pageBounds for why the
+// key rather than the index.
 type permissionClassCursor struct {
 	ScopeType string `json:"scopeType"`
 	ScopeID   string `json:"scopeID"`
