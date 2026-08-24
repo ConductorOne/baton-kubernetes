@@ -661,3 +661,45 @@ func TestWholesalePermissionsAreSharedAcrossObjects(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotEmpty(t, elsewherePerms, "a ClusterRoleBinding reaches every namespace")
 }
+
+// TestNamespacedBindingCannotNameAClusterScopedObject pins the case a wildcard
+// resource slips past the inert check with: `{apiGroups: ["*"], resources: ["*"],
+// resourceNames: ["node-1"]}` in a RoleBinding matches every modelled kind,
+// including Node and Namespace, but access conferred inside one namespace can
+// never reach a cluster-scoped object.
+//
+// isClusterScoped cannot catch it, because a wildcard resource is not known to be
+// cluster-scoped — it covers namespaced kinds too — so the check has to happen
+// where the object is identified.
+func TestNamespacedBindingCannotNameAClusterScopedObject(t *testing.T) {
+	wildcard := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{Name: "name-reader"},
+		Rules:      rules(rule([]string{verbAll}, []string{verbAll}, []string{verbGet}, "node-1")),
+	}
+	client := fake.NewSimpleClientset(wildcard,
+		rbFor("name-reader-team-a", "team-a", RBACKindClusterRole, "name-reader", userSubject("alice@example.com")),
+		crbFor("name-reader-cluster", "name-reader", userSubject("root@example.com")))
+	client.Resources = apiResourceLists()
+
+	k := &Kubernetes{client: client, opts: ConnectorOpts{}}
+	index, err := buildPermissionIndex(context.Background(), client, k, "sync-1", false, false)
+	require.NoError(t, err)
+
+	// The namespaced binding reaches namespaced objects by that name...
+	assert.NotEmpty(t, index.namedVerbs(namedObject{
+		resourceType: ResourceTypeSecret.Id, objectID: "team-a/node-1",
+	}), "a namespaced kind in the binding's own namespace is reachable")
+
+	// ...but not the cluster-scoped ones. Both edges here can only have come from
+	// the ClusterRoleBinding, so they carry its principal and not the RoleBinding's.
+	for _, clusterScoped := range []*v2.ResourceType{ResourceTypeNode, ResourceTypeNamespace} {
+		verbs := index.namedVerbs(namedObject{resourceType: clusterScoped.Id, objectID: "node-1"})
+		require.Len(t, verbs, 1, clusterScoped.Id)
+		for _, principals := range verbs {
+			for _, principal := range principals {
+				assert.Equal(t, clusterScopedMember, principal.expandVia,
+					"%s/node-1 must only be reachable cluster-wide", clusterScoped.Id)
+			}
+		}
+	}
+}

@@ -406,7 +406,9 @@ func TestRoleAssignmentPagesByKey(t *testing.T) {
 		token = results.NextPageToken
 	}
 
-	sort.Strings(ids)
+	// Not sorted: the emission order is part of what this guards. pageBounds
+	// resumes from the last key, so an ordering change in the shared helper would
+	// show up here as pairs arriving out of assignmentKey.less order.
 	assert.Equal(t, []string{"cluster:edit", "cluster:view", "ns:team-a:admin", "ns:team-b:view"}, ids,
-		"every pair exactly once, in order, across single-item pages")
+		"every pair exactly once, in key order, across single-item pages")
 }

@@ -1002,6 +1002,14 @@ func (b *permissionIndexBuilder) addObjectPermissions(
 // reporting false when the rule identifies no single object.
 func instanceObjectID(resourceType *v2.ResourceType, scopeType, scopeID, name string) (string, bool) {
 	if clusterScopedInstanceTypes[resourceType.Id] {
+		if scopeType == ResourceTypeNamespace.Id {
+			// Access conferred inside one namespace can never reach a
+			// cluster-scoped object. addRule's inert check does not catch this
+			// case, because a rule reaches here with a wildcard resource — and a
+			// wildcard is not known to be cluster-scoped, since it also covers
+			// namespaced kinds.
+			return "", false
+		}
 		return name, true
 	}
 	if scopeType != ResourceTypeNamespace.Id {
