@@ -4,11 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/types/grant"
-	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
 	rbacv1 "k8s.io/api/rbac/v1"
 )
 
@@ -47,70 +45,6 @@ func ParseAggregationRule(aggregationRule interface{}) (map[string]interface{}, 
 		return nil, err
 	}
 	return result, nil
-}
-
-// generateWildcardResource creates a special resource that represents all resources of a specific type
-// for use with role permissions that apply to all instances of a resource type.
-func generateWildcardResource(resourceType *v2.ResourceType) (*v2.Resource, error) {
-	// Create a resource ID with the wildcard pattern
-	resourceID := "*"
-	displayName := "All " + resourceType.DisplayName
-
-	// Create basic profile data
-	profile := map[string]interface{}{
-		profileKeyName: displayName,
-		profileKeyUID:  "wildcard-" + resourceType.Id,
-	}
-
-	// Handle different resource types differently to add appropriate traits.
-	switch resourceType.Id {
-	case ResourceTypeSecret.Id:
-		// For secrets, use NewSecretResource with SecretTrait.
-		options := []rs.ResourceOption{
-			rs.WithDescription("Represents all secrets in the cluster"),
-			rs.WithResourceCreatedAt(time.Now()),
-			rs.WithResourceProfile(profile),
-		}
-
-		return rs.NewSecretResource(
-			displayName,
-			resourceType,
-			resourceID,
-			nil,
-			options...,
-		)
-	case ResourceTypeServiceAccount.Id:
-		// For service accounts, use NewUserResource with UserTrait.
-		userOptions := []rs.UserTraitOption{
-			rs.WithAccountType(v2.UserTrait_ACCOUNT_TYPE_SERVICE),
-		}
-
-		return rs.NewUserResource(
-			displayName,
-			resourceType,
-			resourceID,
-			userOptions,
-			rs.WithResourceStatus(v2.Status_RESOURCE_STATUS_ENABLED, ""),
-			rs.WithResourceProfile(profile),
-		)
-	case ResourceTypeRole.Id, ResourceTypeClusterRole.Id:
-		// For roles, use NewRoleResource with RoleTrait.
-		return rs.NewRoleResource(
-			displayName,
-			resourceType,
-			resourceID,
-			nil,
-			rs.WithResourceProfile(profile),
-		)
-	default:
-		// For other resource types, use standard NewResource.
-		return rs.NewResource(
-			displayName,
-			resourceType,
-			resourceID,
-			rs.WithDescription("Represents all resources of type "+resourceType.DisplayName),
-		)
-	}
 }
 
 func GenerateResourceForGrant(rName string, rType string) *v2.Resource {

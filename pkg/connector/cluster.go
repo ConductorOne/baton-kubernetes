@@ -27,25 +27,18 @@ type clusterBuilder struct {
 	name string
 	// host is the API server URL, the fallback label.
 	host string
-	// enabled reports whether the sparse model is on. The type is registered
-	// either way so a tenant selecting it can never fail the sync's resource
-	// type validation, but with the sparse model off there is nothing for this
-	// resource to anchor, so emitting it would add a resource the flat model
-	// never had.
-	enabled bool
 }
 
 func (c *clusterBuilder) ResourceType(_ context.Context) *v2.ResourceType {
 	return ResourceTypeCluster
 }
 
-// List returns the single cluster resource, or nothing when the sparse model is
-// off.
+// List returns the single cluster resource.
+//
+// Emitted whenever the type is selected, which is the only gate it needs: it is
+// one resource, and both the sparse role assignments and the cluster-wide
+// api_resource targets point at it as their scope or parent.
 func (c *clusterBuilder) List(_ context.Context, _ *v2.ResourceId, _ rs.SyncOpAttrs) ([]*v2.Resource, *rs.SyncOpResults, error) {
-	if !c.enabled {
-		return nil, nil, nil
-	}
-
 	displayName := clusterDisplayName(c.name, c.host)
 	profile := map[string]interface{}{
 		profileKeyName: displayName,
@@ -104,6 +97,6 @@ func clusterScopeResourceID() *v2.ResourceId {
 	return &v2.ResourceId{ResourceType: ResourceTypeCluster.Id, Resource: clusterResourceID}
 }
 
-func newClusterBuilder(name, host string, enabled bool) *clusterBuilder {
-	return &clusterBuilder{name: name, host: host, enabled: enabled}
+func newClusterBuilder(name, host string) *clusterBuilder {
+	return &clusterBuilder{name: name, host: host}
 }

@@ -3,6 +3,22 @@
   "resourceTypeCapabilities": [
     {
       "resourceType": {
+        "id": "api_resource",
+        "displayName": "API Resource",
+        "annotations": [
+          {
+            "@type": "type.googleapis.com/c1.connector.v2.OptInRequired"
+          }
+        ]
+      },
+      "capabilities": [
+        "CAPABILITY_SYNC"
+      ],
+      "permissions": {},
+      "optInRequired": true
+    },
+    {
+      "resourceType": {
         "id": "cluster",
         "displayName": "Cluster",
         "annotations": [
@@ -40,6 +56,9 @@
         "annotations": [
           {
             "@type": "type.googleapis.com/c1.connector.v2.OptInRequired"
+          },
+          {
+            "@type": "type.googleapis.com/c1.connector.v2.SkipEntitlements"
           }
         ]
       },
@@ -56,6 +75,9 @@
         "annotations": [
           {
             "@type": "type.googleapis.com/c1.connector.v2.OptInRequired"
+          },
+          {
+            "@type": "type.googleapis.com/c1.connector.v2.SkipEntitlements"
           }
         ]
       },
@@ -72,6 +94,9 @@
         "annotations": [
           {
             "@type": "type.googleapis.com/c1.connector.v2.OptInRequired"
+          },
+          {
+            "@type": "type.googleapis.com/c1.connector.v2.SkipEntitlements"
           }
         ]
       },
@@ -110,7 +135,12 @@
     {
       "resourceType": {
         "id": "namespace",
-        "displayName": "Namespace"
+        "displayName": "Namespace",
+        "annotations": [
+          {
+            "@type": "type.googleapis.com/c1.connector.v2.SkipEntitlements"
+          }
+        ]
       },
       "capabilities": [
         "CAPABILITY_SYNC"
@@ -124,6 +154,9 @@
         "annotations": [
           {
             "@type": "type.googleapis.com/c1.connector.v2.OptInRequired"
+          },
+          {
+            "@type": "type.googleapis.com/c1.connector.v2.SkipEntitlements"
           }
         ]
       },
@@ -140,6 +173,12 @@
         "annotations": [
           {
             "@type": "type.googleapis.com/c1.connector.v2.OptInRequired"
+          },
+          {
+            "@type": "type.googleapis.com/c1.connector.v2.SkipEntitlements"
+          },
+          {
+            "@type": "type.googleapis.com/c1.connector.v2.SkipSyncAnomalyDetection"
           }
         ]
       },
@@ -147,7 +186,8 @@
         "CAPABILITY_SYNC"
       ],
       "permissions": {},
-      "optInRequired": true
+      "optInRequired": true,
+      "skipSyncAnomalyDetection": true
     },
     {
       "resourceType": {
@@ -194,6 +234,9 @@
         "annotations": [
           {
             "@type": "type.googleapis.com/c1.connector.v2.OptInRequired"
+          },
+          {
+            "@type": "type.googleapis.com/c1.connector.v2.SkipEntitlements"
           }
         ]
       },
@@ -209,6 +252,11 @@
         "displayName": "Service Account",
         "traits": [
           "TRAIT_USER"
+        ],
+        "annotations": [
+          {
+            "@type": "type.googleapis.com/c1.connector.v2.SkipEntitlements"
+          }
         ]
       },
       "capabilities": [
@@ -223,6 +271,9 @@
         "annotations": [
           {
             "@type": "type.googleapis.com/c1.connector.v2.OptInRequired"
+          },
+          {
+            "@type": "type.googleapis.com/c1.connector.v2.SkipEntitlements"
           }
         ]
       },

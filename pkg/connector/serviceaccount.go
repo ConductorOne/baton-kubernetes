@@ -9,7 +9,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
-	"github.com/conductorone/baton-sdk/pkg/types/entitlement"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"go.uber.org/zap"
@@ -18,6 +17,9 @@ import (
 // serviceAccountBuilder syncs Kubernetes ServiceAccounts as Baton users.
 type serviceAccountBuilder struct {
 	client kubernetes.Interface
+	// perms resolves which roles confer this builder's objects' permissions.
+	// Only grants need it: what a type declares is fixed (object_permissions.go).
+	perms *permissionResolver
 }
 
 // ResourceType returns the resource type for ServiceAccount.
@@ -38,16 +40,6 @@ func (s *serviceAccountBuilder) List(ctx context.Context, parentResourceID *v2.R
 	bag, err := ParsePageToken(opts.PageToken.Token)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to parse page token: %w", err)
-	}
-
-	// Add wildcard resource first, but only on the first page (when page token is empty)
-	if bag.PageToken() == "" {
-		wildcardResource, err := generateWildcardResource(ResourceTypeServiceAccount)
-		if err != nil {
-			l.Error("failed to create wildcard resource for service accounts", zap.Error(err))
-		} else {
-			rv = append(rv, wildcardResource)
-		}
 	}
 
 	// Set up list options with pagination
@@ -143,31 +135,33 @@ func serviceAccountResource(serviceAccount *corev1.ServiceAccount) (*v2.Resource
 	return resource, nil
 }
 
-// Entitlements returns entitlements for ServiceAccount resources.
-func (s *serviceAccountBuilder) Entitlements(_ context.Context, resource *v2.Resource, _ rs.SyncOpAttrs) ([]*v2.Entitlement, *rs.SyncOpResults, error) {
-	// Add 'impersonate' entitlement
-	impersonateEnt := entitlement.NewPermissionEntitlement(
-		resource,
-		"impersonate",
-		entitlement.WithDisplayName(fmt.Sprintf("Impersonate %s", resource.DisplayName)),
-		entitlement.WithDescription(fmt.Sprintf("Grants the ability to impersonate the %s service account", resource.DisplayName)),
-		entitlement.WithGrantableTo(
-			ResourceTypeRole,
-			ResourceTypeClusterRole,
-		),
-	)
-
-	return []*v2.Entitlement{impersonateEnt}, nil, nil
+// StaticEntitlements declares what an object of this type can carry, once for
+// the whole type rather than per object. The set is fixed and needs nothing from
+// the cluster — see object_permissions.go for why it is a capability list rather
+// than a reading of the rules.
+func (s *serviceAccountBuilder) StaticEntitlements(_ context.Context, _ rs.SyncOpAttrs) ([]*v2.Entitlement, *rs.SyncOpResults, error) {
+	return staticObjectEntitlements(ResourceTypeServiceAccount), nil, nil
 }
 
-// Grants returns no grants for ServiceAccount resources.
-func (s *serviceAccountBuilder) Grants(_ context.Context, resource *v2.Resource, _ rs.SyncOpAttrs) ([]*v2.Grant, *rs.SyncOpResults, error) {
+// Entitlements returns none: the type carries SkipEntitlements and declares its
+// entitlements through StaticEntitlements instead.
+func (s *serviceAccountBuilder) Entitlements(_ context.Context, _ *v2.Resource, _ rs.SyncOpAttrs) ([]*v2.Entitlement, *rs.SyncOpResults, error) {
 	return nil, nil, nil
 }
 
+// Grants returns the roles conferring those named-object permissions, expandable
+// through each one's membership entitlement so the subjects holding the role
+// inherit the permission.
+func (s *serviceAccountBuilder) Grants(ctx context.Context, resource *v2.Resource, opts rs.SyncOpAttrs) ([]*v2.Grant, *rs.SyncOpResults, error) {
+	// objectGrants returns no grants alongside an error, so this needs no branch.
+	grants, err := objectGrants(ctx, s.perms, opts, ResourceTypeServiceAccount, resource)
+	return grants, nil, err
+}
+
 // newServiceAccountBuilder creates a new service account builder.
-func newServiceAccountBuilder(client kubernetes.Interface) *serviceAccountBuilder {
+func newServiceAccountBuilder(client kubernetes.Interface, perms *permissionResolver) *serviceAccountBuilder {
 	return &serviceAccountBuilder{
 		client: client,
+		perms:  perms,
 	}
 }

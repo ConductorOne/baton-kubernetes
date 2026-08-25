@@ -204,6 +204,12 @@
       "displayName": "Sync cluster role assignments",
       "description": "If true, sync each (cluster role, scope) pair that has a binding as a role assignment resource, instead of declaring one entitlement per cluster role per namespace. Namespaced roles are unaffected.",
       "boolField": {}
+    },
+    {
+      "name": "include-system-object-permissions",
+      "displayName": "Include control-plane permissions on objects",
+      "description": "If true, also report permissions held by system: cluster roles on individual objects. These are the Kubernetes control plane's own controllers and they reach every object, so they are excluded by default. What they permit is reported on API resources regardless.",
+      "boolField": {}
     }
   ],
   "constraints": [

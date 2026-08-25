@@ -55,10 +55,11 @@ baton resources
 | Secret | Secret resource | — |
 | Cluster (`cluster`) | Singleton standing for the cluster itself; the scope a cluster-wide role assignment points at | — |
 | Role Assignment (`role_assignment`) | One (cluster role, scope) pair that has at least one binding — see below | `assigned` — granted to users, groups, and service accounts |
+| API Resource (`api_resource`) | One authorization target an RBAC rule names: an API resource at a scope, e.g. pods in `team-a` — see below | one per verb a rule names — granted to roles, cluster roles and role assignments |
 
 Role and ClusterRole resources carry their RBAC rules in the resource profile: the structured `rules` (apiGroups, resources, resourceNames, verbs, nonResourceURLs), the unions across all rules, and a risk summary — `canModify`, `modifiableVerbs`, `modifiableVerbCount` — where a modifiable verb is any of `create, update, patch, delete, deletecollection, bind, escalate, impersonate, *`. Aggregated ClusterRoles are marked `aggregated: true`; their rules are the effective set, because the Kubernetes aggregation controller materializes them into the object.
 
-By default only the core RBAC resource types are synced (namespace, service_account, role, cluster_role, kube_user, kube_group). Workload and configuration types (node, pod, deployment, statefulset, daemonset, configmap, secret) are opt-in via the standard `--sync-resource-types` flag (`BATON_SYNC_RESOURCE_TYPES`). An explicit selection replaces the default set, so list every resource type ID you want, e.g. `--sync-resource-types namespace,service_account,role,cluster_role,kube_user,kube_group,pod`.
+By default only the core RBAC resource types are synced (namespace, service_account, role, cluster_role, kube_user, kube_group), alongside `cluster`, `role_assignment` and `api_resource`, which emit nothing unless their flag is set. Workload and configuration types (node, pod, deployment, statefulset, daemonset, configmap, secret) are opt-in via the standard `--sync-resource-types` flag (`BATON_SYNC_RESOURCE_TYPES`). An explicit selection replaces the default set, so list every resource type ID you want, e.g. `--sync-resource-types namespace,service_account,role,cluster_role,kube_user,kube_group,pod`.
 
 ## Cluster Role Assignments
 
@@ -84,6 +85,199 @@ baton-kubernetes --use-role-assignments \
 ```
 
 With no explicit selection the connector's own default already includes both, so the flag alone is enough.
+
+## Role Permissions
+
+Membership answers *who holds a role*. Permissions answer *what the role permits*, as
+reviewable edges rather than profile text: every API resource a bound RBAC rule names becomes
+an `api_resource` resource, carrying one entitlement per verb that rule grants.
+
+There is no flag for this. **Selecting a resource type is what asks for its access data** — a
+type that synced its objects but not the access to them would be inventory, which is not why
+anyone selects a resource type. `api_resource` is in the default selection, because it is the
+only resource that can carry a permission over a *class* of objects and most of RBAC is exactly
+that.
+
+```
+kube_user / kube_group / service_account
+        │  holds the role, in a scope        (role / cluster_role / role_assignment)
+        ▼
+cluster_role: edit
+        │  grant: create                     ← the permission edge
+        ▼
+api_resource: core:pods@team-a               "pods in team-a"
+```
+
+The resource ID is `<apiGroup>:<resource>@<scope>`, with the core group written `core` and
+`*` as the cluster-wide scope: `core:pods@team-a`, `core:pods@*`, `apps:deployments@team-a`,
+`core:pods/exec@team-a`, `_url:/healthz@*` for non-resource URLs. The API group is part of
+the ID because a resource plural is not unique — a stock cluster serves `events` in both
+the core and `events.k8s.io` groups, ClusterRole `edit` names `deployments` in both `apps`
+and the long-dead `extensions`, and CRDs collide freely (`gateways` exists in both
+`networking.istio.io` and `gateway.networking.k8s.io`). Display names hide it for core
+kinds: *pods in team-a*, *deployments (apps) in team-a*.
+
+Scope comes from the binding, never from the role, so the same ClusterRole produces
+different targets depending on how it is bound:
+
+| binding | target |
+| --- | --- |
+| ClusterRole + ClusterRoleBinding | `core:pods@*` — every namespace, including ones created later |
+| ClusterRole + RoleBinding in `team-a` | `core:pods@team-a` |
+| Role in `team-a` + RoleBinding | `core:pods@team-a` |
+
+Cluster-wide targets are children of the `cluster` singleton and namespace-scoped ones
+children of their namespace, so nothing floats outside the resource tree.
+
+What it deliberately does not do:
+
+- **Only what a rule names.** A verb no rule mentions is never declared, so every
+  entitlement has at least one grant. Nothing is minted for a (resource, scope) pair no
+  binding reaches, and an unbound role produces no edges at all — its rules stay visible in
+  its own profile.
+- **Wildcards stay literal.** `resources: ["*"]` is the single target `*:*` and
+  `verbs: ["*"]` a single `*` entitlement, so `cluster-admin` costs one resource and one
+  entitlement instead of being expanded against the whole API surface. Filter on `*:*` to
+  find wildcard holders.
+- **Inert rules are dropped.** A Role or a RoleBinding can only confer access inside one
+  namespace, so a rule naming a cluster-scoped kind (`nodes`, `persistentvolumes`) or a
+  non-resource URL never matches and produces no edge. Detecting this reads the discovery
+  API, which needs no extra access — `system:discovery` is bound to `system:authenticated`
+  on every cluster. Kinds discovery does not describe are kept rather than dropped.
+- **Subresources are their own targets.** `pods/exec` is a distinct API resource in RBAC —
+  `kubectl auth can-i create pods/exec` — not a verb on pods, so it is modelled as
+  `core:pods/exec@<scope>`.
+
+Grants are held by roles, never handed to identities directly, and each one is expandable
+through the principal's own membership entitlement, so the subjects holding the role inherit
+the permission during the sync's expansion phase. The principal is whichever resource
+carries a membership entitlement for that exact scope: with `--use-role-assignments` the
+`role_assignment`, otherwise the `cluster_role` (through `all:member` or
+`<namespace>:member`); a namespaced `role` is always its own principal. The two flags
+compose — one decides how membership is modelled, the other what the role permits.
+
+### Object-level permissions
+
+When a workload or configuration type is synced, its objects carry the permissions RBAC
+rules confer on them — so "who can read *this* secret" or "who can exec into *this* pod" is
+answered on the object's own page:
+
+```
+secret:team-a/app-db-password:get        ←  role:team-a/app-operator, and the identities holding it
+pod:kube-system/coredns-abc:create:exec  ←  cluster_role:admin, …
+```
+
+**The entitlements are fixed per type, not derived from the rules.** An entitlement is a
+capability and a grant is who holds it, so a pod declares `delete` whether or not anything
+currently confers it — "nobody can delete this pod" is a reviewable fact, and an entitlement
+that came and went as RBAC changed would churn every C1 object referencing it: a campaign, a
+request, a policy. Each type declares its set once through `StaticEntitlements`, and the SDK
+fans that declaration over every object of the type.
+
+The sets are known ahead of time and listed in `pkg/connector/object_permissions.go`: for each
+type, the object-addressable verbs the API server accepts, the same for each of its
+subresources, the RBAC-only verbs no discovery document reports (`impersonate` on a
+ServiceAccount — it authorizes an action rather than naming an endpoint), and the wildcard.
+A pod declares 25:
+
+```
+*  create:attach  create:binding  create:eviction  create:exec  create:portforward
+create:proxy  delete  delete:proxy  get  get:attach  get:ephemeralcontainers  get:exec
+get:log  get:portforward  get:proxy  get:status  patch  patch:ephemeralcontainers
+patch:proxy  patch:status  update  update:ephemeralcontainers  update:proxy  update:status
+```
+
+Three filters keep it faithful:
+
+- **Only verbs that address an object.** `get`, `update`, `patch`, `delete`, `impersonate`.
+  `list`, `watch` and `deletecollection` are permissions over a collection, not over any
+  member of it, and they stay on the `api_resource` target. `create` is the interesting case:
+  creating an object cannot be named, but creating a *subresource* can — `kubectl exec mypod`
+  is a `create` on `pods/exec` whose path carries the pod name.
+- **Subresources keep their name.** A rule on `pods/exec` gives the pod `create:exec`, not
+  `create`, which would read as permission to create the pod. Likewise `get:log`,
+  `update:scale`, `patch:status`.
+- **A wildcard subresource only reaches kinds that have it.** `{apiGroups: ["*"], resources:
+  ["*/scale"]}` — the horizontal-pod-autoscaler controller's rule — reaches Deployments and
+  StatefulSets, not Secrets, because there is no `secrets/scale`. Discovery answers that, and
+  a grant for anything a type does not declare is dropped rather than pointing at an
+  entitlement nothing created.
+
+The API group never has to be inferred: the connector knows the group of every type it syncs
+(a Deployment is always `apps/deployments`), and matching is one-directional — the wildcards
+are on the rule side, so `{apiGroups: ["*"]}` and `{resources: ["*"]}` reach it while a rule
+naming the dead `extensions/deployments` reaches nothing.
+
+**The control plane is excluded here by default.** Every `system:` cluster role is bound
+cluster-wide and most hold broad rules, so each one otherwise lands on every object of every
+synced type, and on a stock cluster that is the large majority of this layer — none of it
+access anyone reviews.
+What those roles permit stays on the `api_resource` targets, where it costs one edge per API
+resource rather than one per object, and a rule naming a specific object is kept either way.
+`--include-system-object-permissions` (`BATON_INCLUDE_SYSTEM_OBJECT_PERMISSIONS`) puts them
+back. The match is on the `system:` prefix, so a role of your own called `acme-system:reader`
+is never mistaken for the control plane.
+
+Pods carry `SkipSyncAnomalyDetection`, because a rollout legitimately replaces every pod in a
+Deployment and that drop is churn rather than an access regression. No other type does — a
+namespace or secret disappearing is worth flagging.
+
+### Named objects
+
+A `resourceNames` rule narrows a rule to specific objects, so it gets its own narrowed
+`api_resource` target rather than widening the broad one —
+`core:secrets:app-db-password@team-a`, displayed *secrets "app-db-password" in team-a*.
+Folding it into `core:secrets@team-a` would claim, of a role that can read one Secret, that
+it can read every Secret in the namespace.
+
+The same rule also lands on the real object when its type is synced and it exists. The
+narrowed target is what carries the permission when it does not — RBAC lets a rule name an
+object that has not been created yet, and that grant is still real.
+
+**Nothing is invented.** Before this flag existed, every pod, secret, configmap, deployment,
+statefulset, daemonset and node declared a fixed
+`get list watch create update patch delete` set, and every service account declared
+`impersonate` — hundreds of entitlements that could never be granted, because nothing in the
+cluster conferred them. Now a type declares exactly the permissions Kubernetes can authorize
+against one of its objects, and a grant appears only where a rule confers it.
+
+### Scale
+
+The two layers grow along different axes, so size them separately:
+
+- **`api_resource` grows with the cluster's API surface and the breadth of the roles bound in
+  each namespace**, not with object counts. A namespace contributes its bound roles' rules once:
+  upstream `view` names 56 targets, `edit` 67 and `admin` 70, while `cluster-admin` names exactly
+  one (`*:*`). Wildcard-heavy roles are cheap; broad concrete ones are not. This layer is on by
+  default, so a cluster with many namespaces each binding `edit` or `admin` is where to look
+  first.
+- **Object-level permissions grow with object count.** The entitlement set is fixed per type, so
+  every object of a synced type carries its full set whether or not anything grants it — a pod
+  declares 25, a Secret or ConfigMap 5. Pods are the type to watch: they are usually the most
+  numerous objects in a cluster and they are recycled on every deploy.
+
+`--sync-resource-types` is the lever for both: leaving the workload types out keeps the object
+layer empty, and the class layer alone still answers what the cluster's RBAC permits.
+
+`api_resource` and `cluster` carry `OptInRequired` but are both in the connector's default
+selection. If you narrow it with `--sync-resource-types`, keep them: without `api_resource`
+there is no way to express a permission over a class of objects, and the collection verbs
+(`list`, `watch`, `create`, `deletecollection`) exist nowhere else, so "who can create pods in
+team-a" becomes unanswerable. `cluster` goes with it, since cluster-wide targets are parented
+to that singleton.
+
+**Keep the role types too.** Every permission grant's principal is a `role`, a `cluster_role`
+or — under `--use-role-assignments` — a `role_assignment`, and its expansion source is an
+entitlement on that same resource. Drop the principal's type from the selection and the SDK
+filters those grants out entirely (`pkg/sync/ingest_filter.go` drops a grant whose principal
+type is not scheduled), so the permission targets sync with their entitlements and **no grants
+at all** — the same silently-empty surface this work removed. Selecting `api_resource` without
+`cluster_role` is the easiest way to get it:
+
+```
+baton-kubernetes \
+  --sync-resource-types namespace,service_account,role,cluster_role,kube_user,kube_group,cluster,api_resource
+```
 
 ## Group Membership
 
@@ -152,6 +346,13 @@ Pick one method. `--token`, `--client-certificate`/`--client-key` and `--as` are
 | `--request-timeout` | Time to wait for a single server request, for example `30s` or `2m`. `0` means no timeout. | `0` |
 | `--disable-compression` | Opt out of response compression for all requests. | `false` |
 
+## Modelling RBAC
+
+| Flag | Description | Default |
+| --- | --- | --- |
+| `--use-role-assignments` | Express cluster role access as one `role_assignment` per (cluster role, scope) pair with a binding, instead of an entitlement per cluster role per namespace. See [Cluster Role Assignments](#cluster-role-assignments). | `false` |
+| `--include-system-object-permissions` | Also report what Kubernetes' own `system:` cluster roles permit on individual objects. They reach every object of every type, so they are excluded from that layer by default. | `false` |
+
 ## Selecting resource types
 
 The connector syncs the six core RBAC types by default. Use the standard `--sync-resource-types` flag (or `BATON_SYNC_RESOURCE_TYPES`) to select a different set, as described in [Data Model](#data-model). An explicit selection replaces the default set rather than adding to it.
@@ -193,6 +394,7 @@ Flags:
       --health-check-port int                            Port for the HTTP health check endpoint ($BATON_HEALTH_CHECK_PORT) (default 8081)
   -h, --help                                             help for baton-kubernetes
       --http-timeout-seconds int                         HTTP client timeout in seconds (max 1800) ($BATON_HTTP_TIMEOUT_SECONDS) (default 300)
+      --include-system-object-permissions                If true, also report permissions held by system: cluster roles on individual objects. These are the Kubernetes control plane's own controllers and they reach every object, so they are excluded by default. What they permit is reported on API resources regardless. ($BATON_INCLUDE_SYSTEM_OBJECT_PERMISSIONS)
       --insecure-skip-tls-verify                         If true, the server's certificate will not be checked for validity. This will make your HTTPS connections insecure ($BATON_INSECURE_SKIP_TLS_VERIFY)
       --keep-previous-sync-c1z                           Keep the previously synced c1z on disk to enable ETag replay across service-mode syncs (requires a connector that supports ETag replay; costs one c1z of local disk) ($BATON_KEEP_PREVIOUS_SYNC_C1Z)
       --kubeconfig string                                Path to the kubeconfig file to use for CLI requests. ($BATON_KUBECONFIG)

@@ -29,6 +29,10 @@ const (
 	// FlagUseRoleAssignments is this connector's own flag, not one of
 	// cli-runtime's.
 	FlagUseRoleAssignments = "use-role-assignments"
+
+	// FlagIncludeSystemObjectPermissions is this connector's own flag, not one
+	// of cli-runtime's.
+	FlagIncludeSystemObjectPermissions = "include-system-object-permissions"
 )
 
 var (
@@ -125,6 +129,25 @@ var (
 				" Namespaced roles are unaffected."),
 		field.WithDefaultValue(false),
 	)
+	// includeSystemObjectPermissionsField restores the control plane's own
+	// permissions on individual objects.
+	//
+	// They are skipped by default because they are the bulk of the object layer
+	// and none of it is reviewable access: the API server's controllers hold
+	// cluster-wide rules, so every one of them lands on every object of every
+	// type. Measured on a stock test cluster, 78% of object-level grants came
+	// from system:* cluster roles and their service accounts. What those roles
+	// permit is still reported on the api_resource targets either way, where it
+	// costs one edge per API resource instead of one per object.
+	includeSystemObjectPermissionsField = field.BoolField(
+		FlagIncludeSystemObjectPermissions,
+		field.WithDisplayName("Include control-plane permissions on objects"),
+		field.WithDescription(
+			"If true, also report permissions held by system: cluster roles on individual objects."+
+				" These are the Kubernetes control plane's own controllers and they reach every object,"+
+				" so they are excluded by default. What they permit is reported on API resources regardless."),
+		field.WithDefaultValue(false),
+	)
 )
 
 // ConfigurationFields lists all connector-specific schema fields.
@@ -146,6 +169,7 @@ var ConfigurationFields = []field.SchemaField{
 	timeoutField,
 	disableCompressionField,
 	useRoleAssignmentsField,
+	includeSystemObjectPermissionsField,
 }
 
 // ConfigRelations lists mutual-exclusivity and required-together constraints.

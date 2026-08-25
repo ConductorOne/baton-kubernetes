@@ -26,6 +26,7 @@ func TestConfigurationFields(t *testing.T) {
 		config.FlagTimeout,
 		config.FlagDisableCompression,
 		config.FlagUseRoleAssignments,
+		config.FlagIncludeSystemObjectPermissions,
 	}
 
 	got := make(map[string]bool)
