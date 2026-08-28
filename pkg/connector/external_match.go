@@ -47,6 +47,13 @@ const (
 // list, so a second slug can be added if a source needs a different one.
 const externalGroupMemberEntitlement = "members"
 
+// makeCarrierBID is a seam. bid.MakeBid cannot fail for the inputs built here —
+// the carrier resource always has both a type and a non-empty id — so the
+// error branch below is only reachable from tests, which is exactly why it
+// needs one: the branch must keep the durable grant, and nothing else proves
+// it does.
+var makeCarrierBID = bid.MakeBid
+
 // ExternalMatchConfig names the profile keys a Kubernetes subject is matched on.
 // The zero value is usable and takes the defaults; nothing here turns matching
 // on or off.
@@ -100,7 +107,7 @@ func (c ExternalMatchConfig) groupCarrierGrant(resource *v2.Resource, entName st
 	cfg := c.withDefaults()
 	carrier := GenerateResourceForGrant(subjectName, ResourceTypeGroup.Id)
 
-	memberBID, err := bid.MakeBid(entitlement.NewAssignmentEntitlement(carrier, externalGroupMemberEntitlement))
+	memberBID, err := makeCarrierBID(entitlement.NewAssignmentEntitlement(carrier, externalGroupMemberEntitlement))
 	if err != nil {
 		return nil, fmt.Errorf("baton-kubernetes: failed to build %q entitlement bid for group %q: %w",
 			externalGroupMemberEntitlement, subjectName, err)

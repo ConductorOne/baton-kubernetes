@@ -1,12 +1,15 @@
 package connector
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/types/grant"
+	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
+	"go.uber.org/zap"
 	rbacv1 "k8s.io/api/rbac/v1"
 )
 
@@ -62,7 +65,12 @@ func GenerateResourceForGrant(rName string, rType string) *v2.Resource {
 // grant on kube_user / kube_group, plus an external-match carrier (see
 // external_match.go). Returns an error for subject kinds we do not model, which
 // callers log and skip.
+//
+// The error is reserved for that one meaning. A carrier that cannot be built is
+// logged and dropped on its own, because the durable grant is the cluster's
+// record of the binding and a failed optimization must not erase it.
 func GrantRoleToSubject(
+	ctx context.Context,
 	subject rbacv1.Subject,
 	resource *v2.Resource,
 	entName string,
@@ -90,7 +98,16 @@ func GrantRoleToSubject(
 			}
 			carrier, err := matchCfg.groupCarrierGrant(resource, entName, subject.Name)
 			if err != nil {
-				return nil, err
+				// Skip the carrier, keep the durable grant. Returning the error
+				// here would lose both: every caller reads an error as an
+				// unsupported subject kind and drops the subject entirely.
+				ctxzap.Extract(ctx).Warn(
+					"baton-kubernetes: failed to build external-match carrier, keeping durable group grant",
+					zap.String("subject_name", subject.Name),
+					zap.String("entitlement", entName),
+					zap.Error(err),
+				)
+				return grants, nil
 			}
 			if carrier != nil {
 				grants = append(grants, carrier)

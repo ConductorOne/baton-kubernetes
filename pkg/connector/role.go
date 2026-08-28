@@ -192,7 +192,7 @@ func (r *roleBuilder) Grants(ctx context.Context, resource *v2.Resource, opts rs
 			if subject.Kind == SubjectKindServiceAccount && subject.Namespace == "" {
 				subject.Namespace = binding.Namespace
 			}
-			subjectGrants, err := GrantRoleToSubject(subject, resource, "member", r.matchCfg)
+			subjectGrants, err := GrantRoleToSubject(ctx, subject, resource, "member", r.matchCfg)
 			if err != nil {
 				l.Debug("subject kind not supported", zap.String("subject kind", subject.Kind))
 				continue

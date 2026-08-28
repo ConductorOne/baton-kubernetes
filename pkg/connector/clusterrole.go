@@ -226,7 +226,7 @@ func (c *clusterRoleBuilder) Grants(ctx context.Context, resource *v2.Resource, 
 	for _, binding := range matchingClusterBindings {
 		// Process each subject in the binding
 		for _, subject := range binding.Subjects {
-			subjectGrants, err := GrantRoleToSubject(subject, resource, clusterScopedMember, c.matchCfg)
+			subjectGrants, err := GrantRoleToSubject(ctx, subject, resource, clusterScopedMember, c.matchCfg)
 			if err != nil {
 				l.Debug("subject type not supported", zap.String("subject kind", subject.Kind))
 				continue
@@ -246,7 +246,7 @@ func (c *clusterRoleBuilder) Grants(ctx context.Context, resource *v2.Resource, 
 				subject.Namespace = binding.Namespace
 			}
 			entName := fmt.Sprintf("%s:%s", namespace, "member")
-			subjectGrants, err := GrantRoleToSubject(subject, resource, entName, c.matchCfg)
+			subjectGrants, err := GrantRoleToSubject(ctx, subject, resource, entName, c.matchCfg)
 			if err != nil {
 				l.Debug("subject kind not supported", zap.String("subject kind", subject.Kind))
 				continue

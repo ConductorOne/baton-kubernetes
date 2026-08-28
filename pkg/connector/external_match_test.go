@@ -1,6 +1,8 @@
 package connector
 
 import (
+	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -92,7 +94,7 @@ func pickExpandable(t *testing.T, g *v2.Grant) *v2.GrantExpandable {
 func TestUserSubjectEmitsDurableAndCarrier(t *testing.T) {
 	subject := rbacv1.Subject{Kind: SubjectKindUser, Name: "alice@example.com", APIGroup: RBACAPIGroup}
 
-	grants, err := GrantRoleToSubject(subject, testRoleResource, "member", ExternalMatchConfig{})
+	grants, err := GrantRoleToSubject(context.Background(), subject, testRoleResource, "member", ExternalMatchConfig{})
 	require.NoError(t, err)
 	require.Len(t, grants, 2)
 
@@ -124,7 +126,7 @@ func TestUserSubjectEmitsDurableAndCarrier(t *testing.T) {
 func TestGroupSubjectEmitsDurableAndCarrier(t *testing.T) {
 	subject := rbacv1.Subject{Kind: SubjectKindGroup, Name: "SCRUM-HPC-ADMIN", APIGroup: RBACAPIGroup}
 
-	grants, err := GrantRoleToSubject(subject, testRoleResource, "member", ExternalMatchConfig{})
+	grants, err := GrantRoleToSubject(context.Background(), subject, testRoleResource, "member", ExternalMatchConfig{})
 	require.NoError(t, err)
 	require.Len(t, grants, 2)
 
@@ -160,7 +162,7 @@ func TestGroupSubjectEmitsDurableAndCarrier(t *testing.T) {
 func TestGroupCarrierExpandableTargetsItsOwnPrincipal(t *testing.T) {
 	subject := rbacv1.Subject{Kind: SubjectKindGroup, Name: "prod-developer", APIGroup: RBACAPIGroup}
 
-	grants, err := GrantRoleToSubject(subject, testRoleResource, "member", ExternalMatchConfig{})
+	grants, err := GrantRoleToSubject(context.Background(), subject, testRoleResource, "member", ExternalMatchConfig{})
 	require.NoError(t, err)
 	carriers := carrierGrants(grants)
 	require.Len(t, carriers, 1)
@@ -191,7 +193,7 @@ func TestCarrierAndDurableGrantIDsDiffer(t *testing.T) {
 		{Kind: SubjectKindGroup, Name: "admins", APIGroup: RBACAPIGroup},
 	} {
 		t.Run(subject.Kind, func(t *testing.T) {
-			grants, err := GrantRoleToSubject(subject, testRoleResource, "member", ExternalMatchConfig{})
+			grants, err := GrantRoleToSubject(context.Background(), subject, testRoleResource, "member", ExternalMatchConfig{})
 			require.NoError(t, err)
 			require.Len(t, grants, 2)
 			assert.NotEqual(t, grants[0].GetId(), grants[1].GetId())
@@ -204,7 +206,7 @@ func TestCarrierAndDurableGrantIDsDiffer(t *testing.T) {
 func TestServiceAccountEmitsNoCarrier(t *testing.T) {
 	subject := rbacv1.Subject{Kind: SubjectKindServiceAccount, Name: "argo", Namespace: "argocd"}
 
-	grants, err := GrantRoleToSubject(subject, testRoleResource, "member", ExternalMatchConfig{})
+	grants, err := GrantRoleToSubject(context.Background(), subject, testRoleResource, "member", ExternalMatchConfig{})
 	require.NoError(t, err)
 	require.Len(t, grants, 1)
 	assert.Equal(t, ResourceTypeServiceAccount.Id, grants[0].GetPrincipal().GetId().GetResourceType())
@@ -220,7 +222,7 @@ func TestSystemSubjectsStillSkipped(t *testing.T) {
 		{Kind: SubjectKindUser, Name: "system:kube-controller-manager", APIGroup: RBACAPIGroup},
 	} {
 		t.Run(subject.Name, func(t *testing.T) {
-			grants, err := GrantRoleToSubject(subject, testRoleResource, "member", ExternalMatchConfig{})
+			grants, err := GrantRoleToSubject(context.Background(), subject, testRoleResource, "member", ExternalMatchConfig{})
 			require.Error(t, err)
 			assert.Empty(t, grants)
 		})
@@ -232,7 +234,7 @@ func TestSystemSubjectsStillSkipped(t *testing.T) {
 func TestNonRBACAPIGroupSubjectsSkipped(t *testing.T) {
 	subject := rbacv1.Subject{Kind: SubjectKindUser, Name: "alice", APIGroup: "example.com"}
 
-	grants, err := GrantRoleToSubject(subject, testRoleResource, "member", ExternalMatchConfig{})
+	grants, err := GrantRoleToSubject(context.Background(), subject, testRoleResource, "member", ExternalMatchConfig{})
 	require.Error(t, err)
 	assert.Empty(t, grants)
 }
@@ -245,6 +247,7 @@ func TestExternalMatchConfigOverrides(t *testing.T) {
 	}
 
 	userGrants, err := GrantRoleToSubject(
+		context.Background(),
 		rbacv1.Subject{Kind: SubjectKindUser, Name: "alice@corp.example", APIGroup: RBACAPIGroup},
 		testRoleResource, "member", cfg)
 	require.NoError(t, err)
@@ -253,6 +256,7 @@ func TestExternalMatchConfigOverrides(t *testing.T) {
 	assert.Equal(t, "userPrincipalName", pickMatch(t, userCarrier[0]).GetKey())
 
 	groupGrants, err := GrantRoleToSubject(
+		context.Background(),
 		rbacv1.Subject{Kind: SubjectKindGroup, Name: "eng", APIGroup: RBACAPIGroup},
 		testRoleResource, "member", cfg)
 	require.NoError(t, err)
@@ -267,6 +271,7 @@ func TestExternalMatchConfigOverrides(t *testing.T) {
 // taking the Slug at face value resolves to nothing and drops the expansion.
 func TestGroupCarrierMemberEntitlementSlug(t *testing.T) {
 	grants, err := GrantRoleToSubject(
+		context.Background(),
 		rbacv1.Subject{Kind: SubjectKindGroup, Name: "eng", APIGroup: RBACAPIGroup},
 		testRoleResource, "member", ExternalMatchConfig{})
 	require.NoError(t, err)
@@ -295,4 +300,30 @@ func TestExternalMatchConfigDefaults(t *testing.T) {
 	partial := ExternalMatchConfig{GroupMatchKey: "displayName"}.withDefaults()
 	assert.Equal(t, DefaultExternalUserMatchKey, partial.UserMatchKey)
 	assert.Equal(t, "displayName", partial.GroupMatchKey)
+}
+
+// TestGroupCarrierFailureKeepsDurableGrant guards the asymmetry between the two
+// things GrantRoleToSubject can fail at.
+//
+// An unsupported subject kind is a real error and callers skip the subject. A
+// carrier that will not build is not: the durable kube_group grant is the
+// cluster's own record that this binding exists, and it has to survive. Callers
+// read any error as "unsupported subject kind" and drop the subject entirely, so
+// returning one here would silently delete access data over a failed
+// optimization.
+func TestGroupCarrierFailureKeepsDurableGrant(t *testing.T) {
+	orig := makeCarrierBID
+	t.Cleanup(func() { makeCarrierBID = orig })
+	makeCarrierBID = func(bid.BID) (string, error) {
+		return "", errors.New("synthetic bid failure")
+	}
+
+	subject := rbacv1.Subject{Kind: SubjectKindGroup, Name: "eng", APIGroup: RBACAPIGroup}
+	grants, err := GrantRoleToSubject(context.Background(), subject, testRoleResource, "member", ExternalMatchConfig{})
+
+	require.NoError(t, err, "a carrier failure must not surface as an error: callers read it as an unsupported subject kind and skip the subject")
+	require.Len(t, grants, 1, "the durable grant must survive on its own")
+	assert.Empty(t, carrierGrants(grants), "no carrier should be emitted when it cannot be built")
+	assert.Equal(t, ResourceTypeKubeGroup.Id, grants[0].GetPrincipal().GetId().GetResourceType())
+	assert.Equal(t, "eng", grants[0].GetPrincipal().GetId().GetResource())
 }

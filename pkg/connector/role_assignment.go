@@ -389,7 +389,7 @@ func (b *roleAssignmentBuilder) Grants(ctx context.Context, resource *v2.Resourc
 		}
 		seen[subject] = true
 
-		subjectGrants, err := GrantRoleToSubject(subject, resource, assignedEntitlement, b.matchCfg)
+		subjectGrants, err := GrantRoleToSubject(ctx, subject, resource, assignedEntitlement, b.matchCfg)
 		if err != nil {
 			l.Debug("subject kind not supported", zap.String("subject kind", subject.Kind))
 			continue
