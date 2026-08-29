@@ -108,7 +108,7 @@ func TestRoleAssignmentsEmitNothingWhenDisabled(t *testing.T) {
 		crbFor("view-everywhere", "view", userSubject("alice")),
 	)
 
-	assignments, _, err := newRoleAssignmentBuilder(client, &Kubernetes{client: client}, false).
+	assignments, _, err := newRoleAssignmentBuilder(client, &Kubernetes{client: client}, false, ExternalMatchConfig{}).
 		List(ctx, nil, rs.SyncOpAttrs{SyncID: "sync-1"})
 	require.NoError(t, err)
 	assert.Empty(t, assignments, "role assignments must not be emitted alongside the flat model")
@@ -198,4 +198,45 @@ func TestDefaultSyncFilterIsRegistered(t *testing.T) {
 	}
 	assert.Less(t, len(defaults), len(AllResourceTypeIDs),
 		"the default must still be narrower than everything, or it is not a default")
+}
+
+// TestExternalMatchConfigReachesBuilders covers the flag -> config -> builder
+// hop. A key that decodes but never reaches a builder leaves the connector
+// silently matching on defaults, which looks like a directory that just does not
+// match rather than a wiring bug.
+func TestExternalMatchConfigReachesBuilders(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("KUBECONFIG", "")
+
+	builder, _, err := NewFromConfig(context.Background(), &pkgconfig.Kubernetes{
+		Server:                "https://127.0.0.1:65535",
+		Token:                 "fake-token",
+		InsecureSkipTlsVerify: true,
+		ExternalUserMatchKey:  "userPrincipalName",
+		ExternalGroupMatchKey: "displayName",
+	}, nil)
+	require.NoError(t, err)
+
+	want := ExternalMatchConfig{
+		UserMatchKey:  "userPrincipalName",
+		GroupMatchKey: "displayName",
+	}
+
+	// Check every builder that emits subject grants; one missed call site would
+	// let the flat and sparse models disagree.
+	var checked int
+	for _, s := range builder.ResourceSyncers(context.Background()) {
+		switch b := s.(type) {
+		case *roleBuilder:
+			assert.Equal(t, want, b.matchCfg, "role builder")
+			checked++
+		case *clusterRoleBuilder:
+			assert.Equal(t, want, b.matchCfg, "cluster role builder")
+			checked++
+		case *roleAssignmentBuilder:
+			assert.Equal(t, want, b.matchCfg, "role assignment builder")
+			checked++
+		}
+	}
+	assert.Equal(t, 3, checked, "every subject-granting builder must receive the match config")
 }

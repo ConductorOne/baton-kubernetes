@@ -86,6 +86,8 @@ type roleAssignmentBuilder struct {
 	// entitlements and grants, so emitting assignments too would count the same
 	// access twice.
 	enabled bool
+	// matchCfg tunes external-match carriers. See external_match.go.
+	matchCfg ExternalMatchConfig
 
 	// clusterRoles caches the names of existing cluster roles for one sync, so
 	// paging through assignments does not re-list them per page.
@@ -387,12 +389,12 @@ func (b *roleAssignmentBuilder) Grants(ctx context.Context, resource *v2.Resourc
 		}
 		seen[subject] = true
 
-		subjectGrant, err := GrantRoleToSubject(subject, resource, assignedEntitlement)
+		subjectGrants, err := GrantRoleToSubject(ctx, subject, resource, assignedEntitlement, b.matchCfg)
 		if err != nil {
 			l.Debug("subject kind not supported", zap.String("subject kind", subject.Kind))
 			continue
 		}
-		rv = append(rv, subjectGrant)
+		rv = append(rv, subjectGrants...)
 	}
 
 	return rv, nil, nil
@@ -472,11 +474,17 @@ func pageLimit(size int) int {
 	return size
 }
 
-func newRoleAssignmentBuilder(client kubernetes.Interface, k8s *Kubernetes, enabled bool) *roleAssignmentBuilder {
+func newRoleAssignmentBuilder(
+	client kubernetes.Interface,
+	k8s *Kubernetes,
+	enabled bool,
+	matchCfg ExternalMatchConfig,
+) *roleAssignmentBuilder {
 	return &roleAssignmentBuilder{
 		client:          client,
 		bindings:        k8s,
 		bindingProvider: k8s,
 		enabled:         enabled,
+		matchCfg:        matchCfg,
 	}
 }

@@ -191,6 +191,32 @@ The following authentication methods are **not supported** for group membership 
 
 **What this means for access reviews:** RBAC bindings to groups are fully visible. If `ClusterRole:admin` is bound to group `developers`, that grant is synced. However, the list of users in `developers` is only complete if those users authenticate via x509 client certificates whose kubeconfigs are stored as Secrets in the cluster. Users authenticating via OIDC or webhook will appear as grant targets on Roles and ClusterRoles if they have direct bindings, but not as members of their groups.
 
+To resolve those memberships from the directory that does hold them, attach an identity source.
+
+## Matching cluster identities to a directory
+
+A cluster authorizes identities it does not store, so a `User` or `Group` subject in an RBAC binding is only a string the authenticator asserted: an OIDC claim, an x509 `CN=`/`O=` field, a Microsoft Entra object ID, an AWS IAM ARN. The directory that knows who that principal is belongs to a different app in C1.
+
+Selecting that app as this connector's **identity source** lets C1 resolve the two. Each `User` and `Group` subject the connector reports is matched against the identity source's principals, and a matched group is expanded through the directory's own membership, so `Group developers → ClusterRole admin` becomes reviewable person by person — the membership Kubernetes itself cannot supply.
+
+Matching is attempted two ways at once, because which one fits depends on the directory rather than on Kubernetes:
+
+- against the external resource's **ID**, for directories whose identifiers the cluster uses verbatim, such as Microsoft Entra group object IDs or AWS IAM role ARNs
+- against a **profile field**, for the OIDC case where the subject is a human-readable name or email address
+
+The defaults suit a cluster federated through an OIDC issuer and need no configuration. Change them when the cluster federates against something else:
+
+| Setting | Default | Change it to |
+| :--- | :--- | :--- |
+| External user match key | `email`, which also matches a user's email addresses | `userPrincipalName` for Microsoft Entra |
+| External group match key | `display_name`, where Microsoft Entra publishes a group's name | `sAMAccountName` to match Active Directory directly rather than through Entra |
+
+Resolving a matched group to the accounts inside it needs no setting: the connector targets the membership entitlement Microsoft Entra publishes, which is the identity source it is built to federate against.
+
+<Note>
+**Group access stays reviewable whether or not an identity source is attached.** Matching adds a resolved view of each group; it never replaces the group itself. A group that matches nothing in the directory — or a connector with no identity source selected at all — still reports the group as a first-class grantee you can attest in a campaign.
+</Note>
+
 ## Understanding how the connector selects a cluster
 
 The connector resolves its target cluster in this order:

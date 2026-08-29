@@ -27,6 +27,8 @@ func TestConfigurationFields(t *testing.T) {
 		config.FlagDisableCompression,
 		config.FlagUseRoleAssignments,
 		config.FlagIncludeSystemObjectPermissions,
+		config.FlagExternalUserMatchKey,
+		config.FlagExternalGroupMatchKey,
 	}
 
 	got := make(map[string]bool)

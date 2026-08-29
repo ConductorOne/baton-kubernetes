@@ -298,6 +298,36 @@ The following authentication methods are **not supported** for group membership 
 
 RBAC bindings to groups are fully visible. If `ClusterRole:admin` is bound to group `developers`, that grant is synced. However, **the list of users in `developers` is only complete if those users authenticate via x509 client certificates stored as kubeconfig Secrets in the cluster**. Users authenticating via OIDC or webhook will appear as grant targets on Roles and ClusterRoles (if they have direct bindings) but not as members of their groups.
 
+To resolve those memberships, attach an identity source instead — see below.
+
+## External Identity Matching
+
+Because a cluster authorizes identities it does not store, a `User` or `Group` subject in an RBAC binding is only a string some authenticator asserted: an OIDC claim, an x509 `CN=`/`O=` field, a Microsoft Entra object ID, an AWS IAM ARN. The directory that knows who that principal is belongs to a different ConductorOne app.
+
+Attaching that app as an **identity source** lets ConductorOne resolve the two. For every `User` and `Group` subject the connector emits an additional *carrier* grant annotated with what it knows about the subject, and the Baton SDK rewrites each carrier onto the matching principal from the identity source. A matched group additionally expands through the directory's own membership entitlement, so `Group developers → ClusterRole admin` becomes visible per person — the membership Kubernetes itself cannot supply.
+
+Two match strategies ride on every carrier and both are attempted, since which one fits is a property of the directory rather than of Kubernetes:
+
+- the external resource's **ID**, for directories whose IDs Kubernetes uses verbatim (Entra group object IDs, IAM role ARNs)
+- a **profile field**, for the OIDC case where the subject is a human-readable name or address
+
+The defaults suit an OIDC-federated cluster and need no configuration. Override them when the cluster federates against something else:
+
+| Flag | Default | Set it to |
+| --- | --- | --- |
+| `--external-user-match-key` | `email` — also matches a user's email addresses | `userPrincipalName` for Microsoft Entra |
+| `--external-group-match-key` | `display_name` — where Entra publishes a group's name | `sAMAccountName` to match Active Directory directly rather than through Entra |
+
+A matched group expands through the identity source's own membership entitlement. That is not configurable: it has to be an entitlement the source actually emitted, and the connector targets Entra's (`members`). Federating against a directory that names it `member` instead — Okta, Google Workspace, Active Directory — requires a code change, not a flag.
+
+Locally, point the connector at another connector's `.c1z` to do the same resolution offline:
+
+```
+baton-kubernetes --external-resource-c1z ./entra.c1z
+```
+
+**Group access stays reviewable with no identity source at all.** The carrier is emitted alongside the ordinary `kube_user` / `kube_group` grant, never instead of it — a carrier is consumed and discarded during matching, so cluster-level evidence would be lost if it were the only record. With no identity source configured, or when a group matches nothing in the directory, the group remains a first-class, attestable grantee exactly as before.
+
 # Contributing, Support and Issues
 
 We started Baton because we were tired of taking screenshots and manually
@@ -386,9 +416,11 @@ Flags:
       --cluster string                                   The name of the kubeconfig cluster to use ($BATON_CLUSTER)
       --context string                                   The name of the kubeconfig context to use ($BATON_CONTEXT)
       --disable-compression                              If true, opt-out of response compression for all requests to the server ($BATON_DISABLE_COMPRESSION)
+      --external-group-match-key string                  Profile field on the external identity source to match a Kubernetes Group subject against. Defaults to "display_name", which is where Microsoft Entra publishes a group's name. Group subjects are additionally always matched against the external group's ID, which is what AKS clusters use as the group name (an Entra object GUID). ($BATON_EXTERNAL_GROUP_MATCH_KEY)
       --external-resource-c1z string                     The path to the c1z file to sync external baton resources with ($BATON_EXTERNAL_RESOURCE_C1Z)
       --external-resource-entitlement-id-filter string   The entitlement that external users, groups must have access to sync external baton resources ($BATON_EXTERNAL_RESOURCE_ENTITLEMENT_ID_FILTER)
       --external-resource-traits strings                 Resource type traits (e.g. "user", "group", "app") to sync and match from the external resource c1z. When unset the matcher falls back to user and group; passing this flag replaces the full set rather than adding to it. ($BATON_EXTERNAL_RESOURCE_TRAITS)
+      --external-user-match-key string                   Profile field on the external identity source to match a Kubernetes User subject against. Defaults to "email", which also matches a user's email addresses. Use "userPrincipalName" for clusters federated against Microsoft Entra. ($BATON_EXTERNAL_USER_MATCH_KEY)
   -f, --file string                                      The path to the c1z file to sync with ($BATON_FILE) (default "sync.c1z")
       --health-check                                     Enable the HTTP health check endpoint ($BATON_HEALTH_CHECK)
       --health-check-port int                            Port for the HTTP health check endpoint ($BATON_HEALTH_CHECK_PORT) (default 8081)

@@ -1,12 +1,15 @@
 package connector
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/types/grant"
+	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
+	"go.uber.org/zap"
 	rbacv1 "k8s.io/api/rbac/v1"
 )
 
@@ -56,8 +59,23 @@ func GenerateResourceForGrant(rName string, rType string) *v2.Resource {
 	}
 }
 
-func GrantRoleToSubject(subject rbacv1.Subject, resource *v2.Resource, entName string) (*v2.Grant, error) {
-	var grantOpts []grant.GrantOption
+// GrantRoleToSubject renders one RBAC binding subject as grants on entName.
+//
+// A ServiceAccount yields one grant. A User or Group yields two: the durable
+// grant on kube_user / kube_group, plus an external-match carrier (see
+// external_match.go). Returns an error for subject kinds we do not model, which
+// callers log and skip.
+//
+// The error is reserved for that one meaning. A carrier that cannot be built is
+// logged and dropped on its own, because the durable grant is the cluster's
+// record of the binding and a failed optimization must not erase it.
+func GrantRoleToSubject(
+	ctx context.Context,
+	subject rbacv1.Subject,
+	resource *v2.Resource,
+	entName string,
+	matchCfg ExternalMatchConfig,
+) ([]*v2.Grant, error) {
 	if subject.Kind == SubjectKindServiceAccount {
 		saName := fmt.Sprintf("%s/%s", subject.Namespace, subject.Name) // SA are always namespaced, even if they can have cluster roles bind to cluster level.
 		saResource := GenerateResourceForGrant(saName, ResourceTypeServiceAccount.Id)
@@ -66,31 +84,48 @@ func GrantRoleToSubject(subject rbacv1.Subject, resource *v2.Resource, entName s
 			entName,
 			saResource,
 		)
-		return g, nil
+		return []*v2.Grant{g}, nil
 	} else if (subject.APIGroup == RBACAPIGroup || subject.APIGroup == RBACAPIGroupV1) &&
 		!strings.Contains(subject.Name, "system:") { // Ignore System subjects
 		if subject.Kind == SubjectKindGroup {
-			// Group grants intentionally carry no GrantExpandable annotation: vanilla
-			// Kubernetes has no membership source to expand through (membership lives
-			// in the authenticator — x509 O= fields, OIDC claims, cloud IAM mappers).
-			// Cloud connectors (EKS/AKS/GKE) add their own expansion annotations paired
-			// with ExternalResourceMatch in their custom builders.
 			groupResource := GenerateResourceForGrant(subject.Name, ResourceTypeKubeGroup.Id)
-			g := grant.NewGrant(
-				resource,
-				entName,
-				groupResource,
-			)
-			return g, nil
+			grants := []*v2.Grant{
+				grant.NewGrant(
+					resource,
+					entName,
+					groupResource,
+				),
+			}
+			carrier, err := matchCfg.groupCarrierGrant(resource, entName, subject.Name)
+			if err != nil {
+				// Skip the carrier, keep the durable grant. Returning the error
+				// here would lose both: every caller reads an error as an
+				// unsupported subject kind and drops the subject entirely.
+				ctxzap.Extract(ctx).Warn(
+					"baton-kubernetes: failed to build external-match carrier, keeping durable group grant",
+					zap.String("subject_name", subject.Name),
+					zap.String("entitlement", entName),
+					zap.Error(err),
+				)
+				return grants, nil
+			}
+			if carrier != nil {
+				grants = append(grants, carrier)
+			}
+			return grants, nil
 		}
 		if subject.Kind == SubjectKindUser {
-			g := grant.NewGrant(
-				resource,
-				entName,
-				GenerateResourceForGrant(subject.Name, ResourceTypeKubeUser.Id),
-				grantOpts...,
-			)
-			return g, nil
+			grants := []*v2.Grant{
+				grant.NewGrant(
+					resource,
+					entName,
+					GenerateResourceForGrant(subject.Name, ResourceTypeKubeUser.Id),
+				),
+			}
+			if carrier := matchCfg.userCarrierGrant(resource, entName, subject.Name); carrier != nil {
+				grants = append(grants, carrier)
+			}
+			return grants, nil
 		}
 	}
 	return nil, fmt.Errorf("unsupported subject type")

@@ -96,8 +96,12 @@ var (
 		Annotations: optInAnnotations(),
 	}
 	ResourceTypeBinding = &v2.ResourceType{Id: "binding", DisplayName: "Binding", Description: "Internal type for processing RBAC bindings"}
-	ResourceTypeUser    = &v2.ResourceType{Id: "user", DisplayName: SubjectTypeUser, Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_USER}}
-	ResourceTypeGroup   = &v2.ResourceType{Id: "group", DisplayName: SubjectTypeGroup, Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_GROUP}}
+	// ResourceTypeUser and ResourceTypeGroup are the placeholder principals that
+	// external-match carriers point at. Deliberately unregistered and absent from
+	// DeclaredResourceTypeIDs: they stand for resources in another app, and the
+	// carrier is deleted once matching runs. See external_match.go.
+	ResourceTypeUser  = &v2.ResourceType{Id: "user", DisplayName: SubjectTypeUser, Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_USER}}
+	ResourceTypeGroup = &v2.ResourceType{Id: "group", DisplayName: SubjectTypeGroup, Traits: []v2.ResourceType_Trait{v2.ResourceType_TRAIT_GROUP}}
 )
 
 // SparseResourceTypeIDs lists the types belonging to the sparse model, which

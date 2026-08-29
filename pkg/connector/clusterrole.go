@@ -28,6 +28,8 @@ type clusterRoleBuilder struct {
 	// because the role_assignment type is expressing the same access. The two
 	// models are mutually exclusive; emitting both would double-count it.
 	useRoleAssignments bool
+	// matchCfg tunes external-match carriers. See external_match.go.
+	matchCfg ExternalMatchConfig
 	// Cached namespaces
 	cachedNamespaces []string
 	nsMutex          sync.Mutex
@@ -224,12 +226,12 @@ func (c *clusterRoleBuilder) Grants(ctx context.Context, resource *v2.Resource, 
 	for _, binding := range matchingClusterBindings {
 		// Process each subject in the binding
 		for _, subject := range binding.Subjects {
-			subjectGrant, err := GrantRoleToSubject(subject, resource, clusterScopedMember)
+			subjectGrants, err := GrantRoleToSubject(ctx, subject, resource, clusterScopedMember, c.matchCfg)
 			if err != nil {
 				l.Debug("subject type not supported", zap.String("subject kind", subject.Kind))
 				continue
 			}
-			rv = append(rv, subjectGrant)
+			rv = append(rv, subjectGrants...)
 		}
 	}
 
@@ -244,12 +246,12 @@ func (c *clusterRoleBuilder) Grants(ctx context.Context, resource *v2.Resource, 
 				subject.Namespace = binding.Namespace
 			}
 			entName := fmt.Sprintf("%s:%s", namespace, "member")
-			subjectGrant, err := GrantRoleToSubject(subject, resource, entName)
+			subjectGrants, err := GrantRoleToSubject(ctx, subject, resource, entName, c.matchCfg)
 			if err != nil {
 				l.Debug("subject kind not supported", zap.String("subject kind", subject.Kind))
 				continue
 			}
-			rv = append(rv, subjectGrant)
+			rv = append(rv, subjectGrants...)
 		}
 	}
 
@@ -293,10 +295,16 @@ func (c *clusterRoleBuilder) cacheNamespaces(ctx context.Context) error {
 }
 
 // newClusterRoleBuilder creates a new cluster role builder.
-func newClusterRoleBuilder(client kubernetes.Interface, bindingProvider ClusterRoleBindingProvider, useRoleAssignments bool) *clusterRoleBuilder {
+func newClusterRoleBuilder(
+	client kubernetes.Interface,
+	bindingProvider ClusterRoleBindingProvider,
+	useRoleAssignments bool,
+	matchCfg ExternalMatchConfig,
+) *clusterRoleBuilder {
 	return &clusterRoleBuilder{
 		client:             client,
 		bindingProvider:    bindingProvider,
 		useRoleAssignments: useRoleAssignments,
+		matchCfg:           matchCfg,
 	}
 }

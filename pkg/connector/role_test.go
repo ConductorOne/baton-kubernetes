@@ -315,18 +315,18 @@ var podReaderResource = &v2.Resource{
 // report grants from the first sync's bindings forever.
 func TestRoleBuilderGrantsAcrossSyncs(t *testing.T) {
 	fakeClient, k8s := bindRoleFixture(t)
-	builder := newRoleBuilder(fakeClient, k8s)
+	builder := newRoleBuilder(fakeClient, k8s, ExternalMatchConfig{})
 	ctx := context.Background()
 
 	grants, _, err := builder.Grants(ctx, podReaderResource, rs.SyncOpAttrs{SyncID: "sync-1"})
 	require.NoError(t, err)
-	require.Len(t, grants, 1)
+	require.Len(t, durableGrants(grants), 1)
 
 	bindBob(t, ctx, fakeClient)
 
 	grants, _, err = builder.Grants(ctx, podReaderResource, rs.SyncOpAttrs{SyncID: "sync-2"})
 	require.NoError(t, err)
-	assert.Len(t, grants, 2, "a later sync must reflect bindings added since the first sync")
+	assert.Len(t, durableGrants(grants), 2, "a later sync must reflect bindings added since the first sync")
 }
 
 // TestBindingCacheHeldWithinSync verifies the cache still does its job: repeated
@@ -334,18 +334,18 @@ func TestRoleBuilderGrantsAcrossSyncs(t *testing.T) {
 // a full cluster-wide binding list.
 func TestBindingCacheHeldWithinSync(t *testing.T) {
 	fakeClient, k8s := bindRoleFixture(t)
-	builder := newRoleBuilder(fakeClient, k8s)
+	builder := newRoleBuilder(fakeClient, k8s, ExternalMatchConfig{})
 	ctx := context.Background()
 
 	grants, _, err := builder.Grants(ctx, podReaderResource, rs.SyncOpAttrs{SyncID: "sync-1"})
 	require.NoError(t, err)
-	require.Len(t, grants, 1)
+	require.Len(t, durableGrants(grants), 1)
 
 	bindBob(t, ctx, fakeClient)
 
 	grants, _, err = builder.Grants(ctx, podReaderResource, rs.SyncOpAttrs{SyncID: "sync-1"})
 	require.NoError(t, err)
-	assert.Len(t, grants, 1, "the same sync must serve its cached snapshot, not re-list")
+	assert.Len(t, durableGrants(grants), 1, "the same sync must serve its cached snapshot, not re-list")
 }
 
 // TestBindingCacheInvalidationIsIndependentOfList pins the reason the cache is

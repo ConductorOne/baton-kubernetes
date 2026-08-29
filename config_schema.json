@@ -210,6 +210,22 @@
       "displayName": "Include control-plane permissions on objects",
       "description": "If true, also report permissions held by system: cluster roles on individual objects. These are the Kubernetes control plane's own controllers and they reach every object, so they are excluded by default. What they permit is reported on API resources regardless.",
       "boolField": {}
+    },
+    {
+      "name": "external-user-match-key",
+      "displayName": "External user match key",
+      "description": "Profile field on the identity source to match a Kubernetes User subject against. Defaults to \"email\".",
+      "stringField": {
+        "rules": {}
+      }
+    },
+    {
+      "name": "external-group-match-key",
+      "displayName": "External group match key",
+      "description": "Profile field on the identity source to match a Kubernetes Group subject against. Defaults to \"display_name\". Group subjects are also always matched against the identity source's resource ID.",
+      "stringField": {
+        "rules": {}
+      }
     }
   ],
   "constraints": [
@@ -255,5 +271,6 @@
         "client-key"
       ]
     }
-  ]
+  ],
+  "supportsExternalResources": true
 }

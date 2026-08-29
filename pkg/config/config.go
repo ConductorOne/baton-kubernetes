@@ -33,6 +33,10 @@ const (
 	// FlagIncludeSystemObjectPermissions is this connector's own flag, not one
 	// of cli-runtime's.
 	FlagIncludeSystemObjectPermissions = "include-system-object-permissions"
+
+	// External identity matching flags, also this connector's own.
+	FlagExternalUserMatchKey  = "external-user-match-key"
+	FlagExternalGroupMatchKey = "external-group-match-key"
 )
 
 var (
@@ -148,6 +152,25 @@ var (
 				" so they are excluded by default. What they permit is reported on API resources regardless."),
 		field.WithDefaultValue(false),
 	)
+	// These tune identity matching rather than enable it; empty means use the
+	// default in pkg/connector/external_match.go.
+	externalUserMatchKeyField = field.StringField(
+		FlagExternalUserMatchKey,
+		field.WithDisplayName("External user match key"),
+		field.WithDescription(
+			"Profile field on the identity source to match a Kubernetes User subject against."+
+				" Defaults to \"email\"."),
+		field.WithRequired(false),
+	)
+	externalGroupMatchKeyField = field.StringField(
+		FlagExternalGroupMatchKey,
+		field.WithDisplayName("External group match key"),
+		field.WithDescription(
+			"Profile field on the identity source to match a Kubernetes Group subject against."+
+				" Defaults to \"display_name\"."+
+				" Group subjects are also always matched against the identity source's resource ID."),
+		field.WithRequired(false),
+	)
 )
 
 // ConfigurationFields lists all connector-specific schema fields.
@@ -170,6 +193,8 @@ var ConfigurationFields = []field.SchemaField{
 	disableCompressionField,
 	useRoleAssignmentsField,
 	includeSystemObjectPermissionsField,
+	externalUserMatchKeyField,
+	externalGroupMatchKeyField,
 }
 
 // ConfigRelations lists mutual-exclusivity and required-together constraints.
@@ -194,7 +219,12 @@ var ConfigRelations = []field.SchemaFieldRelationship{
 }
 
 // Configuration is the full connector schema passed to DefineConfiguration.
+//
+// SupportsExternalResources is what makes C1 offer the identity-source picker
+// for this app; the --external-resource-* flags are registered by the SDK
+// regardless. See pkg/connector/external_match.go.
 var Configuration = field.NewConfiguration(
 	ConfigurationFields,
 	field.WithConstraints(ConfigRelations...),
+	field.WithSupportsExternalResources(true),
 )
