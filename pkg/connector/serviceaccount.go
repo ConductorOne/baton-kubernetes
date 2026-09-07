@@ -96,7 +96,7 @@ func serviceAccountResource(serviceAccount *corev1.ServiceAccount) (*v2.Resource
 		for _, secret := range serviceAccount.Secrets {
 			secretNames = append(secretNames, secret.Name)
 		}
-		profile["secrets"] = secretNames
+		profile["secrets"] = toAnySlice(secretNames)
 	}
 
 	// Add image pull secrets if present
@@ -105,7 +105,7 @@ func serviceAccountResource(serviceAccount *corev1.ServiceAccount) (*v2.Resource
 		for _, secret := range serviceAccount.ImagePullSecrets {
 			secretNames = append(secretNames, secret.Name)
 		}
-		profile["imagePullSecrets"] = secretNames
+		profile["imagePullSecrets"] = toAnySlice(secretNames)
 	}
 
 	// Get parent namespace resource ID
