@@ -59,6 +59,49 @@ func GenerateResourceForGrant(rName string, rType string) *v2.Resource {
 	}
 }
 
+// GrantEntitlementResource reduces a resource to the identity a grant actually
+// needs to carry.
+//
+// grant.NewGrant copies whatever resource it is handed into every grant's
+// Entitlement.Resource, and entitlement.NewEntitlementID reads only the
+// resource ID, so a profile-bearing resource is replicated once per subject for
+// no gain. That replication is what breaks the sync: the profile of a
+// heavily-bound (cluster role, scope) pair carries one contributingBindings
+// entry per binding, and a rule-heavy cluster role carries its whole rule set,
+// so the response grows as profile size x subject count and crosses gRPC's
+// 4 MiB message limit while the resource itself is a perfectly ordinary size.
+// The same profile is emitted once by List, which is where it belongs and where
+// nothing multiplies it.
+//
+// A User or Group subject yields both a durable grant and an external-match
+// carrier, so the copy happens twice per subject rather than once.
+//
+// The parent is kept: on a partial sync the syncer refetches an entitlement
+// resource it has not stored yet using the ID and parent ID together
+// (baton-sdk pkg/sync/syncer.go, ShouldFetchRelatedResources), so dropping the
+// parent would make a namespaced resource unresolvable. It costs two short
+// strings.
+//
+// IDs are unaffected: both the entitlement ID and the grant ID derive from the
+// resource ID alone, so grants stay byte-identical to what previous syncs
+// emitted.
+func GrantEntitlementResource(resource *v2.Resource) *v2.Resource {
+	id := resource.GetId()
+	if id == nil {
+		// Nothing to strip down to. Hand the resource back untouched and let the
+		// SDK's own validation report the missing identity.
+		return resource
+	}
+
+	return &v2.Resource{
+		Id: &v2.ResourceId{
+			Resource:     id.GetResource(),
+			ResourceType: id.GetResourceType(),
+		},
+		ParentResourceId: resource.GetParentResourceId(),
+	}
+}
+
 // GrantRoleToSubject renders one RBAC binding subject as grants on entName.
 //
 // A ServiceAccount yields one grant. A User or Group yields two: the durable
@@ -76,6 +119,9 @@ func GrantRoleToSubject(
 	entName string,
 	matchCfg ExternalMatchConfig,
 ) ([]*v2.Grant, error) {
+	// Every grant below embeds this, once per subject and again per carrier.
+	resource = GrantEntitlementResource(resource)
+
 	if subject.Kind == SubjectKindServiceAccount {
 		saName := fmt.Sprintf("%s/%s", subject.Namespace, subject.Name) // SA are always namespaced, even if they can have cluster roles bind to cluster level.
 		saResource := GenerateResourceForGrant(saName, ResourceTypeServiceAccount.Id)
