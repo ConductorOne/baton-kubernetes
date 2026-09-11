@@ -241,8 +241,8 @@ func (k *kubeGroupBuilder) Grants(ctx context.Context, resource *v2.Resource, op
 
 	principals := result.GroupMembers[resource.Id.Resource]
 	grants := make([]*v2.Grant, 0, len(principals))
-	// Stripped once rather than per member. See GrantEntitlementResource.
-	entitlementResource := GrantEntitlementResource(resource)
+	// Stripped once rather than per member. See StripResourceForGrant.
+	entitlementResource := StripResourceForGrant(resource)
 	for _, principalName := range principals {
 		principalResource := GenerateResourceForGrant(principalName, ResourceTypeKubeUser.Id)
 		grants = append(grants, grant.NewGrant(entitlementResource, "member", principalResource))

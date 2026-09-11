@@ -577,8 +577,8 @@ func permissionGrant(resource *v2.Resource, verb string, principal principalRef)
 		}))
 	}
 	// Stripped for the same reason as the role grants: an object's profile would
-	// otherwise be copied once per verb per principal. See GrantEntitlementResource.
-	return grant.NewGrant(GrantEntitlementResource(resource), verb, principal.resourceRef(), opts...)
+	// otherwise be copied once per verb per principal. See StripResourceForGrant.
+	return grant.NewGrant(StripResourceForGrant(resource), verb, principal.resourceRef(), opts...)
 }
 
 // verbLabel renders a verb for display, spelling out the wildcard.

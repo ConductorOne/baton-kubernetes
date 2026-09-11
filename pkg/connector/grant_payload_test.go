@@ -51,19 +51,20 @@ func listGrantsBytes(t *testing.T, grants []*v2.Grant) int {
 	return len(b)
 }
 
-// TestGrantEntitlementResourceKeepsIdentity is the compatibility guard: stripping
+// TestStripResourceForGrantKeepsIdentity is the compatibility guard: stripping
 // must not move any ID, or every previously synced grant would be re-keyed.
-func TestGrantEntitlementResourceKeepsIdentity(t *testing.T) {
+func TestStripResourceForGrantKeepsIdentity(t *testing.T) {
 	full := fatAssignmentResource(t, 50)
-	stripped := GrantEntitlementResource(full)
+	stripped := StripResourceForGrant(full)
 
 	require.Equal(t, full.GetId().GetResource(), stripped.GetId().GetResource())
 	require.Equal(t, full.GetId().GetResourceType(), stripped.GetId().GetResourceType())
 	require.Equal(t, entitlement.NewEntitlementID(full, assignedEntitlement),
 		entitlement.NewEntitlementID(stripped, assignedEntitlement))
 
-	// The parent survives: a partial sync refetches an unstored entitlement
-	// resource by ID and parent together.
+	// The parent survives. Nothing in this connector consumes it yet — the SDK's
+	// targeted-sync refetch needs a builder this connector does not have — so
+	// pinning it here is what keeps it from being dropped as dead weight.
 	require.NotNil(t, stripped.GetParentResourceId())
 	require.Equal(t, full.GetParentResourceId().GetResource(), stripped.GetParentResourceId().GetResource())
 	require.Equal(t, full.GetParentResourceId().GetResourceType(), stripped.GetParentResourceId().GetResourceType())
@@ -78,10 +79,22 @@ func TestGrantEntitlementResourceKeepsIdentity(t *testing.T) {
 	require.Nil(t, stripped.GetAnnotations())
 }
 
-func TestGrantEntitlementResourceNilID(t *testing.T) {
+func TestStripResourceForGrantNilID(t *testing.T) {
 	res := &v2.Resource{}
-	require.Same(t, res, GrantEntitlementResource(res),
+	require.Same(t, res, StripResourceForGrant(res),
 		"a resource with no ID is handed back untouched for the SDK to reject")
+}
+
+// TestStripResourceForGrantIsIdempotent pins the property that lets the strip
+// live at the grant-building chokepoints instead of being hoisted to each call
+// site: re-stripping an already-stripped resource changes nothing, so the
+// repeated calls a per-subject loop makes are free of behavioural risk.
+func TestStripResourceForGrantIsIdempotent(t *testing.T) {
+	once := StripResourceForGrant(fatAssignmentResource(t, 50))
+	twice := StripResourceForGrant(once)
+
+	require.True(t, proto.Equal(once, twice),
+		"stripping twice must produce the same resource as stripping once")
 }
 
 // TestRoleAssignmentGrantsStayUnderMessageLimit covers CXP-919: a single

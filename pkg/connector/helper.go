@@ -59,33 +59,10 @@ func GenerateResourceForGrant(rName string, rType string) *v2.Resource {
 	}
 }
 
-// GrantEntitlementResource reduces a resource to the identity a grant actually
-// needs to carry.
-//
-// grant.NewGrant copies whatever resource it is handed into every grant's
-// Entitlement.Resource, and entitlement.NewEntitlementID reads only the
-// resource ID, so a profile-bearing resource is replicated once per subject for
-// no gain. That replication is what breaks the sync: the profile of a
-// heavily-bound (cluster role, scope) pair carries one contributingBindings
-// entry per binding, and a rule-heavy cluster role carries its whole rule set,
-// so the response grows as profile size x subject count and crosses gRPC's
-// 4 MiB message limit while the resource itself is a perfectly ordinary size.
-// The same profile is emitted once by List, which is where it belongs and where
-// nothing multiplies it.
-//
-// A User or Group subject yields both a durable grant and an external-match
-// carrier, so the copy happens twice per subject rather than once.
-//
-// The parent is kept: on a partial sync the syncer refetches an entitlement
-// resource it has not stored yet using the ID and parent ID together
-// (baton-sdk pkg/sync/syncer.go, ShouldFetchRelatedResources), so dropping the
-// parent would make a namespaced resource unresolvable. It costs two short
-// strings.
-//
-// IDs are unaffected: both the entitlement ID and the grant ID derive from the
-// resource ID alone, so grants stay byte-identical to what previous syncs
-// emitted.
-func GrantEntitlementResource(resource *v2.Resource) *v2.Resource {
+// StripResourceForGrant reduces a resource to the identity a grant needs to
+// carry. It is the inverse of GenerateResourceForGrant above, which builds the
+// same shape from its parts.
+func StripResourceForGrant(resource *v2.Resource) *v2.Resource {
 	id := resource.GetId()
 	if id == nil {
 		// Nothing to strip down to. Hand the resource back untouched and let the
@@ -98,6 +75,7 @@ func GrantEntitlementResource(resource *v2.Resource) *v2.Resource {
 			Resource:     id.GetResource(),
 			ResourceType: id.GetResourceType(),
 		},
+		// Kept although nothing consumes it yet: it is part of addressing, not decoration.
 		ParentResourceId: resource.GetParentResourceId(),
 	}
 }
@@ -119,14 +97,14 @@ func GrantRoleToSubject(
 	entName string,
 	matchCfg ExternalMatchConfig,
 ) ([]*v2.Grant, error) {
-	// Every grant below embeds this, once per subject and again per carrier.
-	resource = GrantEntitlementResource(resource)
+	// Its own name rather than reassigning resource, so the full profile stays reachable.
+	entitlementResource := StripResourceForGrant(resource)
 
 	if subject.Kind == SubjectKindServiceAccount {
 		saName := fmt.Sprintf("%s/%s", subject.Namespace, subject.Name) // SA are always namespaced, even if they can have cluster roles bind to cluster level.
 		saResource := GenerateResourceForGrant(saName, ResourceTypeServiceAccount.Id)
 		g := grant.NewGrant(
-			resource,
+			entitlementResource,
 			entName,
 			saResource,
 		)
@@ -137,12 +115,12 @@ func GrantRoleToSubject(
 			groupResource := GenerateResourceForGrant(subject.Name, ResourceTypeKubeGroup.Id)
 			grants := []*v2.Grant{
 				grant.NewGrant(
-					resource,
+					entitlementResource,
 					entName,
 					groupResource,
 				),
 			}
-			carrier, err := matchCfg.groupCarrierGrant(resource, entName, subject.Name)
+			carrier, err := matchCfg.groupCarrierGrant(entitlementResource, entName, subject.Name)
 			if err != nil {
 				// Skip the carrier, keep the durable grant. Returning the error
 				// here would lose both: every caller reads an error as an
@@ -163,12 +141,12 @@ func GrantRoleToSubject(
 		if subject.Kind == SubjectKindUser {
 			grants := []*v2.Grant{
 				grant.NewGrant(
-					resource,
+					entitlementResource,
 					entName,
 					GenerateResourceForGrant(subject.Name, ResourceTypeKubeUser.Id),
 				),
 			}
-			if carrier := matchCfg.userCarrierGrant(resource, entName, subject.Name); carrier != nil {
+			if carrier := matchCfg.userCarrierGrant(entitlementResource, entName, subject.Name); carrier != nil {
 				grants = append(grants, carrier)
 			}
 			return grants, nil
