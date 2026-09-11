@@ -59,6 +59,27 @@ func GenerateResourceForGrant(rName string, rType string) *v2.Resource {
 	}
 }
 
+// StripResourceForGrant reduces a resource to the identity a grant needs to
+// carry. It is the inverse of GenerateResourceForGrant above, which builds the
+// same shape from its parts.
+func StripResourceForGrant(resource *v2.Resource) *v2.Resource {
+	id := resource.GetId()
+	if id == nil {
+		// Nothing to strip down to. Hand the resource back untouched and let the
+		// SDK's own validation report the missing identity.
+		return resource
+	}
+
+	return &v2.Resource{
+		Id: &v2.ResourceId{
+			Resource:     id.GetResource(),
+			ResourceType: id.GetResourceType(),
+		},
+		// Kept although nothing consumes it yet: it is part of addressing, not decoration.
+		ParentResourceId: resource.GetParentResourceId(),
+	}
+}
+
 // GrantRoleToSubject renders one RBAC binding subject as grants on entName.
 //
 // A ServiceAccount yields one grant. A User or Group yields two: the durable
@@ -76,11 +97,14 @@ func GrantRoleToSubject(
 	entName string,
 	matchCfg ExternalMatchConfig,
 ) ([]*v2.Grant, error) {
+	// Its own name rather than reassigning resource, so the full profile stays reachable.
+	entitlementResource := StripResourceForGrant(resource)
+
 	if subject.Kind == SubjectKindServiceAccount {
 		saName := fmt.Sprintf("%s/%s", subject.Namespace, subject.Name) // SA are always namespaced, even if they can have cluster roles bind to cluster level.
 		saResource := GenerateResourceForGrant(saName, ResourceTypeServiceAccount.Id)
 		g := grant.NewGrant(
-			resource,
+			entitlementResource,
 			entName,
 			saResource,
 		)
@@ -91,12 +115,12 @@ func GrantRoleToSubject(
 			groupResource := GenerateResourceForGrant(subject.Name, ResourceTypeKubeGroup.Id)
 			grants := []*v2.Grant{
 				grant.NewGrant(
-					resource,
+					entitlementResource,
 					entName,
 					groupResource,
 				),
 			}
-			carrier, err := matchCfg.groupCarrierGrant(resource, entName, subject.Name)
+			carrier, err := matchCfg.groupCarrierGrant(entitlementResource, entName, subject.Name)
 			if err != nil {
 				// Skip the carrier, keep the durable grant. Returning the error
 				// here would lose both: every caller reads an error as an
@@ -117,12 +141,12 @@ func GrantRoleToSubject(
 		if subject.Kind == SubjectKindUser {
 			grants := []*v2.Grant{
 				grant.NewGrant(
-					resource,
+					entitlementResource,
 					entName,
 					GenerateResourceForGrant(subject.Name, ResourceTypeKubeUser.Id),
 				),
 			}
-			if carrier := matchCfg.userCarrierGrant(resource, entName, subject.Name); carrier != nil {
+			if carrier := matchCfg.userCarrierGrant(entitlementResource, entName, subject.Name); carrier != nil {
 				grants = append(grants, carrier)
 			}
 			return grants, nil
