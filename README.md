@@ -178,13 +178,14 @@ The sets are known ahead of time and listed in `pkg/connector/object_permissions
 type, the object-addressable verbs the API server accepts, the same for each of its
 subresources, the RBAC-only verbs no discovery document reports (`impersonate` on a
 ServiceAccount — it authorizes an action rather than naming an endpoint), and the wildcard.
-A pod declares 25:
+A pod declares 28:
 
 ```
 *  create:attach  create:binding  create:eviction  create:exec  create:portforward
 create:proxy  delete  delete:proxy  get  get:attach  get:ephemeralcontainers  get:exec
-get:log  get:portforward  get:proxy  get:status  patch  patch:ephemeralcontainers
-patch:proxy  patch:status  update  update:ephemeralcontainers  update:proxy  update:status
+get:log  get:portforward  get:proxy  get:resize  get:status  patch
+patch:ephemeralcontainers  patch:proxy  patch:resize  patch:status  update
+update:ephemeralcontainers  update:proxy  update:resize  update:status
 ```
 
 Three filters keep it faithful:
@@ -253,7 +254,7 @@ The two layers grow along different axes, so size them separately:
   first.
 - **Object-level permissions grow with object count.** The entitlement set is fixed per type, so
   every object of a synced type carries its full set whether or not anything grants it — a pod
-  declares 25, a Secret or ConfigMap 5. Pods are the type to watch: they are usually the most
+  declares 28, a Secret or ConfigMap 5. Pods are the type to watch: they are usually the most
   numerous objects in a cluster and they are recycled on every deploy.
 
 `--sync-resource-types` is the lever for both: leaving the workload types out keeps the object
@@ -351,7 +352,7 @@ These flags configure the cluster connection. Every flag also accepts an environ
 | `--cluster` | Name of the kubeconfig cluster to use. | |
 | `--user` | Name of the kubeconfig user to use. | |
 
-When you pass neither `--kubeconfig` nor `--server`, the connector resolves the cluster from the environment: the `KUBECONFIG` variable (a `:`-separated list of paths, first existing file wins), then `$HOME/.kube/config`, then an in-cluster service account. If none of the three is present it exits with `no kubeconfig available: <path> does not exist and no in-cluster service account found`. Name the target explicitly with `--kubeconfig` or `--server` when you run the connector outside a cluster — otherwise it follows whatever cluster your current context points at.
+When you pass neither `--kubeconfig` nor `--server`, the connector resolves the cluster from the environment: the `KUBECONFIG` variable (a `:`-separated list of paths, first existing file wins) or, when `KUBECONFIG` is unset, `$HOME/.kube/config`, then an in-cluster service account. If none of these is present it exits with `no kubeconfig available: <path> does not exist and no in-cluster service account found`. Name the target explicitly with `--kubeconfig` or `--server` when you run the connector outside a cluster — otherwise it follows whatever cluster your current context points at.
 
 ## Authenticating
 
