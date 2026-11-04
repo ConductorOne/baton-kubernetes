@@ -37,8 +37,7 @@ func TestNewFromConfigExplicitServerSkipsKubeconfigGuard(t *testing.T) {
 // neither a kubeconfig nor an explicit server is available, rather than letting
 // client-go fall back to localhost:8080 and report "connection refused".
 func TestNewFromConfigNoSourceStillGuarded(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("KUBECONFIG", "")
+	t.Setenv("KUBECONFIG", filepath.Join(t.TempDir(), "missing"))
 
 	_, _, err := NewFromConfig(context.Background(), &pkgconfig.Kubernetes{}, nil)
 
