@@ -1,13 +1,19 @@
 package connector
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"testing"
 
+	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
@@ -55,6 +61,14 @@ func apiResourceLists() []*metav1.APIResourceList {
 }
 
 func rules(rules ...rbacv1.PolicyRule) []rbacv1.PolicyRule { return rules }
+
+// warnLog returns a context whose logger records warn and above, and the buffer
+// it writes to.
+func warnLog() (context.Context, *bytes.Buffer) {
+	var buf bytes.Buffer
+	core := zapcore.NewCore(zapcore.NewJSONEncoder(zap.NewProductionEncoderConfig()), zapcore.AddSync(&buf), zapcore.WarnLevel)
+	return ctxzap.ToContext(context.Background(), zap.New(core)), &buf
+}
 
 func rule(groups, resources, verbs []string, names ...string) rbacv1.PolicyRule {
 	return rbacv1.PolicyRule{
@@ -489,6 +503,41 @@ func TestObjectPermissionsIncludeRBACOnlyVerbs(t *testing.T) {
 	assert.Contains(t, objectPermissionSets[ResourceTypeServiceAccount.Id], "create:token")
 }
 
+// TestPodPermissionsMatchDiscovery pins the pod set to what the API server
+// advertises for pods and its subresources.
+func TestPodPermissionsMatchDiscovery(t *testing.T) {
+	assert.Equal(t, []string{
+		verbAll,
+		"create:attach",
+		"create:binding",
+		"create:eviction",
+		"create:exec",
+		"create:portforward",
+		"create:proxy",
+		verbDelete,
+		"delete:proxy",
+		verbGet,
+		"get:attach",
+		"get:ephemeralcontainers",
+		"get:exec",
+		"get:log",
+		"get:portforward",
+		"get:proxy",
+		"get:resize",
+		"get:status",
+		verbPatch,
+		"patch:ephemeralcontainers",
+		"patch:proxy",
+		"patch:resize",
+		"patch:status",
+		verbUpdate,
+		"update:ephemeralcontainers",
+		"update:proxy",
+		"update:resize",
+		"update:status",
+	}, objectPermissionSets[ResourceTypePod.Id])
+}
+
 // TestUndeclaredPermissionIsDropped pins the clamp: a grant can never reference an
 // entitlement the type does not declare, because nothing would have created it.
 func TestUndeclaredPermissionIsDropped(t *testing.T) {
@@ -501,9 +550,11 @@ func TestUndeclaredPermissionIsDropped(t *testing.T) {
 		crbFor("widget-operator", "widget-operator", userSubject("alice@example.com")))
 	client.Resources = apiResourceLists()
 
+	ctx, logged := warnLog()
 	k := &Kubernetes{client: client, opts: ConnectorOpts{}}
-	index, err := buildPermissionIndex(context.Background(), client, k, "sync-1", false, false)
+	index, err := buildPermissionIndex(ctx, client, k, "sync-1", false, false)
 	require.NoError(t, err)
+	assert.Empty(t, logged.String())
 
 	pod, err := rs.NewResource("api-server", ResourceTypePod, "team-a/api-server")
 	require.NoError(t, err)
@@ -548,9 +599,11 @@ func TestTotalDiscoveryFailureStillSyncs(t *testing.T) {
 	require.False(t, discovery.IsGroupDiscoveryFailedError(discoveryErr),
 		"a total failure is not a partial one; that distinction is the bug")
 
+	ctx, logged := warnLog()
 	k := &Kubernetes{client: client, opts: ConnectorOpts{}}
-	index, err := buildPermissionIndex(context.Background(), client, k, "sync-1", false, false)
+	index, err := buildPermissionIndex(ctx, client, k, "sync-1", false, false)
 	require.NoError(t, err, "a discovery failure must not fail the sync")
+	assert.Contains(t, logged.String(), "/apis/*")
 
 	// Permissions are still derived.
 	class, ok := index.Class("core:secrets@*")
@@ -567,6 +620,59 @@ func TestTotalDiscoveryFailureStillSyncs(t *testing.T) {
 	// And the wildcard subresource cannot leak onto a kind with no scale
 	// endpoint, because the declared set is fixed rather than discovered.
 	assert.NotContains(t, granted, "update:scale")
+}
+
+// TestPartialDiscoveryFailureKeepsSubresources pins that a kind whose group failed
+// discovery keeps its subresource permissions.
+func TestPartialDiscoveryFailureKeepsSubresources(t *testing.T) {
+	operator := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{Name: "operator"},
+		Rules: rules(
+			rule([]string{""}, []string{"pods/exec"}, []string{verbCreate}),
+			rule([]string{""}, []string{"pods/resize"}, []string{verbPatch}),
+			rule([]string{appsAPIGroup}, []string{"deployments/scale"}, []string{verbUpdate}),
+			rule([]string{appsAPIGroup}, []string{"deployments/madeupsubresource"}, []string{verbUpdate}),
+		),
+	}
+	client := fake.NewSimpleClientset(operator,
+		crbFor("operator-everywhere", "operator", userSubject("alice@example.com")))
+	// core/v1 failed; apps/v1 was discovered.
+	var discovered []*metav1.APIResourceList
+	for _, list := range apiResourceLists() {
+		if list.GroupVersion != "v1" {
+			discovered = append(discovered, list)
+		}
+	}
+	client.Resources = discovered
+	client.PrependReactor("get", "resource", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, &discovery.ErrGroupDiscoveryFailed{
+			Groups: map[schema.GroupVersion]error{{Version: "v1"}: fmt.Errorf("the server is currently unable to handle the request")},
+		}
+	})
+
+	_, _, discoveryErr := client.Discovery().ServerGroupsAndResources()
+	require.True(t, discovery.IsGroupDiscoveryFailedError(discoveryErr),
+		"a partial failure, not a total one")
+
+	ctx, logged := warnLog()
+	k := &Kubernetes{client: client, opts: ConnectorOpts{}}
+	index, err := buildPermissionIndex(ctx, client, k, "sync-1", false, false)
+	require.NoError(t, err)
+	assert.Empty(t, logged.String())
+	resolver := &permissionResolver{provider: stubProvider{index: index}}
+
+	pod, err := rs.NewResource("api-server", ResourceTypePod, "team-a/api-server")
+	require.NoError(t, err)
+	granted, err := resolver.objectPermissions(context.Background(), "sync-1", ResourceTypePod, pod)
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"create:exec", "patch:resize"}, sortedSlugs(granted))
+
+	deployment, err := rs.NewResource("web", ResourceTypeDeployment, "team-a/web")
+	require.NoError(t, err)
+	granted, err = resolver.objectPermissions(context.Background(), "sync-1", ResourceTypeDeployment, deployment)
+	require.NoError(t, err)
+	assert.Contains(t, sortedSlugs(granted), "update:scale")
+	assert.NotContains(t, sortedSlugs(granted), "update:madeupsubresource")
 }
 
 // TestNamedObjectHonoursTheAPIGroup pins that the named-object path applies the
