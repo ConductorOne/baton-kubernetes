@@ -228,7 +228,7 @@ The connector resolves its target cluster in this order:
    - the default kubeconfig at `$HOME/.kube/config`, used only when `KUBECONFIG` is not set
    - an in-cluster service account token, mounted at `/var/run/secrets/kubernetes.io/serviceaccount/token`
 
-   When none of the three exists, the connector exits with `no kubeconfig available: <path> does not exist and no in-cluster service account found`.
+   When none of the three exists, the connector exits with `no kubeconfig available: none of [<paths>] exist and no in-cluster service account found`.
 
 <Warning>
 Name the target cluster explicitly when you run the connector outside a cluster. With neither `--kubeconfig` nor `--server` set, the connector follows the current context of your default kubeconfig, which may point at a different cluster than the one you intend to sync. Confirm the context with `kubectl config current-context` before the first sync.

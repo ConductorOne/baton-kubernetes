@@ -209,7 +209,7 @@ func NewFromConfig(
 		inClusterTokenPath := "/var/run/secrets/kubernetes.io/serviceaccount/token" //nolint:gosec // well-known in-cluster service account token mount path, not a credential
 		_, inClusterErr := os.Stat(inClusterTokenPath)
 		if !kubeconfigFound && os.IsNotExist(inClusterErr) {
-			return nil, nil, fmt.Errorf("no kubeconfig available: %s does not exist and no in-cluster service account found; "+
+			return nil, nil, fmt.Errorf("no kubeconfig available: none of [%s] exist and no in-cluster service account found; "+
 				"provide a kubeconfig via --kubeconfig or the KUBECONFIG environment variable", strings.Join(kubeconfigPaths, ", "))
 		}
 	}

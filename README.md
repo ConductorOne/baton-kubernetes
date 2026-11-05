@@ -352,7 +352,7 @@ These flags configure the cluster connection. Every flag also accepts an environ
 | `--cluster` | Name of the kubeconfig cluster to use. | |
 | `--user` | Name of the kubeconfig user to use. | |
 
-When you pass neither `--kubeconfig` nor `--server`, the connector resolves the cluster from the environment: the `KUBECONFIG` variable (a `:`-separated list of paths, first existing file wins) or, when `KUBECONFIG` is unset, `$HOME/.kube/config`, then an in-cluster service account. If none of these is present it exits with `no kubeconfig available: <path> does not exist and no in-cluster service account found`. Name the target explicitly with `--kubeconfig` or `--server` when you run the connector outside a cluster — otherwise it follows whatever cluster your current context points at.
+When you pass neither `--kubeconfig` nor `--server`, the connector resolves the cluster from the environment: the `KUBECONFIG` variable (a `:`-separated list of paths, first existing file wins) or, when `KUBECONFIG` is unset, `$HOME/.kube/config`, then an in-cluster service account. If none of these is present it exits with `no kubeconfig available: none of [<paths>] exist and no in-cluster service account found`. Name the target explicitly with `--kubeconfig` or `--server` when you run the connector outside a cluster — otherwise it follows whatever cluster your current context points at.
 
 ## Authenticating
 
