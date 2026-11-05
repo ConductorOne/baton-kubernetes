@@ -829,14 +829,13 @@ func (b *permissionIndexBuilder) addRule(rule rbacv1.PolicyRule, src ruleSource)
 // wildcard rule over one is not spread onto kinds without it.
 //
 // Discovery lists subresources as API resources of their own — deployments/scale,
-// pods/exec — which is what makes this answerable. An undiscovered pair is
-// allowed through for the same reason as an undiscovered kind: a CRD whose group
-// failed discovery should not silently lose its permissions.
+// pods/exec — which is what makes this answerable. A kind missing from discovery
+// has subresources that are unknown rather than absent, so they are allowed through.
 func (b *permissionIndexBuilder) hasSubresource(kind instanceKind, subresource string) bool {
 	if subresource == "" {
 		return true
 	}
-	if len(b.apiResources) == 0 {
+	if _, discovered := b.apiResources[schema.GroupResource{Group: kind.group, Resource: kind.plural}]; !discovered {
 		return true
 	}
 	_, known := b.apiResources[schema.GroupResource{
@@ -1209,16 +1208,22 @@ type apiResourceInfo struct {
 // Unknown degrades safely rather than silently wrongly. isClusterScoped then
 // reports nothing as cluster-scoped, so a rule a namespaced binding can never
 // satisfy is reported instead of dropped — the documented trade. hasSubresource
-// reports every subresource as present, so a wildcard rule over "*/scale" spreads
+// reports every subresource of an undiscovered kind as present, so a wildcard
+// rule over "*/scale" spreads
 // to kinds without a scale endpoint, and those slugs are then dropped by the
 // declared set in object_permissions.go, which no cluster state can widen.
 func discoverAPIResources(ctx context.Context, client kubernetes.Interface) map[schema.GroupResource]apiResourceInfo {
 	l := ctxzap.Extract(ctx)
 
 	_, lists, err := client.Discovery().ServerGroupsAndResources()
-	if err != nil {
-		l.Debug("API discovery incomplete; undiscovered kinds are treated as unknown",
-			zap.Bool("partial", discovery.IsGroupDiscoveryFailedError(err)),
+	switch {
+	case err == nil:
+	case discovery.IsGroupDiscoveryFailedError(err):
+		l.Debug("API discovery incomplete; undiscovered kinds are treated as unknown", zap.Error(err))
+	default:
+		l.Warn("API discovery unavailable; rules naming a cluster-scoped resource inside a namespace are "+
+			"reported instead of dropped. Grant get on the non-resource URLs /api, /api/*, /apis and /apis/* "+
+			"to the connector's identity",
 			zap.Error(err))
 	}
 

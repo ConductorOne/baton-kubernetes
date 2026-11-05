@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
+	"strings"
 	"sync"
 
 	pkgconfig "github.com/conductorone/baton-kubernetes/pkg/config"
@@ -21,6 +21,7 @@ import (
 	clioptions "k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 	pointer "k8s.io/utils/ptr"
 )
 
@@ -195,25 +196,21 @@ func NewFromConfig(
 		// explicit and credentials come from --token, --client-certificate/--client-key
 		// or the in-cluster service account, so this check must not run — it would
 		// reject the documented bearer-token setup on hosts without a kubeconfig.
-		envHasKubeconfig := false
-		for _, p := range filepath.SplitList(os.Getenv("KUBECONFIG")) {
-			if p == "" {
-				continue
-			}
-			if _, err := os.Stat(filepath.Clean(p)); err == nil {
-				envHasKubeconfig = true
+		kubeconfigPaths := clientcmd.NewDefaultClientConfigLoadingRules().GetLoadingPrecedence()
+		kubeconfigFound := false
+		for _, p := range kubeconfigPaths {
+			if _, err := os.Stat(p); !os.IsNotExist(err) {
+				kubeconfigFound = true
 				break
 			}
 		}
-		defaultKubeconfig := filepath.Clean(filepath.Join(os.Getenv("HOME"), ".kube", "config"))
 		// inClusterTokenPath is the well-known, fixed mount path for the in-cluster
 		// service account token; it is not a credential value.
 		inClusterTokenPath := "/var/run/secrets/kubernetes.io/serviceaccount/token" //nolint:gosec // well-known in-cluster service account token mount path, not a credential
-		_, defaultErr := os.Stat(defaultKubeconfig)
 		_, inClusterErr := os.Stat(inClusterTokenPath)
-		if !envHasKubeconfig && os.IsNotExist(defaultErr) && os.IsNotExist(inClusterErr) {
-			return nil, nil, fmt.Errorf("no kubeconfig available: %s does not exist and no in-cluster service account found; "+
-				"provide a kubeconfig via --kubeconfig or the KUBECONFIG environment variable", defaultKubeconfig)
+		if !kubeconfigFound && os.IsNotExist(inClusterErr) {
+			return nil, nil, fmt.Errorf("no kubeconfig available: none of [%s] exist and no in-cluster service account found; "+
+				"provide a kubeconfig via --kubeconfig or the KUBECONFIG environment variable", strings.Join(kubeconfigPaths, ", "))
 		}
 	}
 

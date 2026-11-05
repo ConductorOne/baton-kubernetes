@@ -40,6 +40,7 @@ var objectPermissionSets = map[string][]string{
 		newSubresource("log", verbGet),
 		newSubresource("portforward", verbCreate, verbGet),
 		newSubresource("proxy", verbCreate, verbDelete, verbGet, verbPatch, verbUpdate),
+		newSubresource("resize", verbGet, verbPatch, verbUpdate),
 		newSubresource("status", verbGet, verbPatch, verbUpdate),
 	),
 	ResourceTypeSecret.Id: objectSlugs(
