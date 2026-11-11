@@ -47,7 +47,7 @@ baton resources
 | Kubernetes User (`kube_user`) | User identity referenced in RBAC bindings | — |
 | Kubernetes Group (`kube_group`) | Group identity referenced in RBAC bindings | `member` — see limitations below |
 | Node | Cluster node | — |
-| Pod | Running pod | — |
+| Pod | Kubernetes pod | — |
 | Deployment | Deployment resource | — |
 | StatefulSet | StatefulSet resource | — |
 | DaemonSet | DaemonSet resource | — |
