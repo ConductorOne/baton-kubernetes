@@ -59,7 +59,7 @@ baton resources
 
 Role and ClusterRole resources carry their RBAC rules in the resource profile: the structured `rules` (apiGroups, resources, resourceNames, verbs, nonResourceURLs), the unions across all rules, and a risk summary — `canModify`, `modifiableVerbs`, `modifiableVerbCount` — where a modifiable verb is any of `create, update, patch, delete, deletecollection, bind, escalate, impersonate, *`. Aggregated ClusterRoles are marked `aggregated: true`; their rules are the effective set, because the Kubernetes aggregation controller materializes them into the object.
 
-By default only the core RBAC resource types are synced (namespace, service_account, role, cluster_role, kube_user, kube_group), alongside `cluster`, `role_assignment` and `api_resource`, which emit nothing unless their flag is set. Workload and configuration types (node, pod, deployment, statefulset, daemonset, configmap, secret) are opt-in via the standard `--sync-resource-types` flag (`BATON_SYNC_RESOURCE_TYPES`). An explicit selection replaces the default set, so list every resource type ID you want, e.g. `--sync-resource-types namespace,service_account,role,cluster_role,kube_user,kube_group,pod`.
+By default the connector syncs nine resource types: the core RBAC ones (namespace, service_account, role, cluster_role, kube_user, kube_group) alongside `cluster`, `api_resource` and `role_assignment`. Of the three, only `role_assignment` is gated behind a flag — it emits nothing unless `--use-role-assignments` is set. Workload and configuration types (node, pod, deployment, statefulset, daemonset, configmap, secret) are opt-in via the standard `--sync-resource-types` flag (`BATON_SYNC_RESOURCE_TYPES`). An explicit selection replaces the default set, so list every resource type ID you want, e.g. `--sync-resource-types namespace,service_account,role,cluster_role,kube_user,kube_group,pod`.
 
 ## Cluster Role Assignments
 
@@ -187,6 +187,13 @@ get:log  get:portforward  get:proxy  get:resize  get:status  patch
 patch:ephemeralcontainers  patch:proxy  patch:resize  patch:status  update
 update:ephemeralcontainers  update:proxy  update:resize  update:status
 ```
+
+Three of those 28 address `pods/resize`, a subresource the API server serves by default from
+Kubernetes 1.33, and on 1.32 only with the alpha `InPlacePodVerticalScaling` feature gate turned
+on. The declared set does not vary with the cluster's version, so every pod carries `get:resize`,
+`patch:resize` and `update:resize` on any cluster; where the subresource is not served nothing can
+grant them, because a rule naming a subresource the discovery document does not report reaches no
+object.
 
 Three filters keep it faithful:
 

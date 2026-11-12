@@ -130,6 +130,10 @@ actually have it, so the autoscaler's rule over `*/scale` reaches deployments bu
 <Note>
 The permission set for each type is fixed and the same for every object of that type, so what
 you can review does not change as the cluster's roles change — only who holds it does.
+
+Three of a pod's permissions — **get resize**, **patch resize** and **update resize** — can only
+be held on Kubernetes 1.33 or later, or on 1.32 with the alpha `InPlacePodVerticalScaling` feature
+gate turned on. On any other cluster every pod still lists them, but nobody holds them.
 </Note>
 
 Kubernetes' own control-plane roles are left out of the object layer. Every `system:` cluster role is
