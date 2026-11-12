@@ -188,10 +188,11 @@ patch:ephemeralcontainers  patch:proxy  patch:resize  patch:status  update
 update:ephemeralcontainers  update:proxy  update:resize  update:status
 ```
 
-Three of those 28 address `pods/resize`, a subresource the API server first serves in Kubernetes
-1.33. The declared set does not vary with the cluster's version, so every pod carries
-`get:resize`, `patch:resize` and `update:resize` on any cluster; below 1.33 nothing can grant
-them, because a rule naming a subresource the discovery document does not report reaches no
+Three of those 28 address `pods/resize`, a subresource the API server serves by default from
+Kubernetes 1.33, and on 1.32 only with the alpha `InPlacePodVerticalScaling` feature gate turned
+on. The declared set does not vary with the cluster's version, so every pod carries `get:resize`,
+`patch:resize` and `update:resize` on any cluster; where the subresource is not served nothing can
+grant them, because a rule naming a subresource the discovery document does not report reaches no
 object.
 
 Three filters keep it faithful:
